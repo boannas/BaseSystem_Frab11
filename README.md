@@ -14,12 +14,22 @@ The system supports multiple operation modes to ensure safe initialization, manu
 2. Operation Modes
 There are two main control modes available in the system:
     1. Manual / Jog mode
-        - Activate this mode by click the `Jog Mode` 
-        - The user manually control the `Theta` axes using a joystick.
-        - The current values of 
+        - Activate this mode by click the `Jog Mode` xxxxxxxx
+        - The user manually control the `Theta` using a joystick.
+        - The current values of `Theta` is displayed live in GUI
+        - The user can move `Theta` in incremental degree by input the value and select direction (clockwise or counter clockwise)
+        - The user able to control the gripper state by toggle button for both `Upward` / `Downward` and `Grip` / `Release`
 
-### Protocal : Address & Function
-#### Register Address Table
+    2. Auto mode
+        - Point to Point: the user can move the `Theta` by giving value (can select for Degree or saved hole index). [can repeatable go <> back] 
+        - Pick and Place: the user need to save the target holes (5 holes), this mode should input the index for pick and place, then press the `Start` button for execute the process.
+
+---
+
+### **Protocal : Address & Function**
+---
+#### **Register Address Table**
+
 | Address   | Description   | Operation |
 |---------- |----------     |---------- |
 | 0x00      | Heartbear Protocol | Read/Write |  
@@ -40,6 +50,9 @@ There are two main control modes available in the system:
 | 0x27      | 4th Hole Position | Read |
 | 0x28      | 5th Hole Position | Read |
 | 0x30      | Goal Point (Hole/deg) | Write |
+| 0x40      | Emergency status  | Read |
+| 0x41      | Stop the process  | Write |
+---
 
 ### Data Format
 #### 1. Base System Status (0x01) 
@@ -50,16 +63,16 @@ Controls the robot’s high-level operating mode and system actions, such as hom
 | 0   | 0000 0000 0000 0001  | 1       | **Home Mode** – Execute homing sequence         |
 | 1   | 0000 0000 0000 0010  | 2       | **Manual Mode** – Jog / manual control          |
 | 2   | 0000 0000 0000 0100  | 4       | **Autonomous Mode** – Execute automatic program |
-| 3   | 0000 0000 0000 1000  | 8       | **Set Holes** – Execute hole-setting routine    |
+<!-- | 3   | 0000 0000 0000 1000  | 8       | **Set Holes** – Execute hole-setting routine    | -->
 
 
-#### 2. Vacuum Status (0x02) 
-Controls the vacuum actuator (ON / OFF).
+#### 2. Gripper Status (0x02) 
+Controls the gripper actuator (Grip / Release).
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000 = Off | 0 = Off | Vacuum Off |
-| 0   | 0000 0000 0000 0001 = Off | 1 = Off | Vacuum On  |
+| 0   | 0000 0000 0000 0000 | 0 = Release | Gripper `Release` |
+| 0   | 0000 0000 0000 0001 | 1 = Grip | Gripper `Grip` |
 
 
 #### 3. Gripper Movement Status (0x03)
@@ -95,10 +108,39 @@ Gripper checkbox = enable / disable gripper actuation
 #### 6. Theta Moving Status (0x10) 
 Monitor the robot's internal state or which actions is currently performing.
 
+| Bit | Data in Binary | Data in Decimal | Meaning |
+| ----- | ----- | ----- | ----- |
+| 0   | 0000 0000 0000 0001 | 1 |   |
+| 1   | 0000 0000 0000 0010 | 2 |   |
+| 2   | 0000 0000 0000 0100 | 4 |   |
+| 3   | 0000 0000 0000 1000 | 8 |   |
+| 4   | 0000 0000 0001 0000 | 16 |   |
+
+
 
 #### 7. Position / Speed / Accelation (0x11 to 0x13)
+Moniter the robot's actual position, speed, accelation. Must contain only two decimal place, before sending the values to the `Base System`, multiply the actual value to 100 (Base_system_value = Actual_value * 100)
+
+> Example: If the value of the position you want to send is '123.45', multiply by 100 to get '12345', and send this value to the address z-axis Actual position (0x11). This will appear in Base-system as '123.45'  
+
 
 
 #### 8. Pick order(0x21), Place order(0x22)
 The order of pick and place sent from the Base system to the robot will correspond to the pick and place order displayed in GUI. 
 
+
+
+#### 9. Emergency status (0x40)
+This receive the `Emergency button state` from the robot
+| Bit | Data in Binary | Data in Decimal | Meaning |
+| ----- | ----- | ----- | ----- |
+| 0   | 0000 0000 0000 0000 | 0 | Emergency `Did not pressed`|
+| 0   | 0000 0000 0000 0001 | 1 | Emergency `Pressed`  |
+
+#### 10. Stop the process (0x41)
+Stop the robot's process.
+
+| Bit | Data in Binary | Data in Decimal | Meaning |
+| ----- | ----- | ----- | ----- |
+| 0   | 0000 0000 0000 0000 | 0 | Robot's run normally  |
+| 0   | 0000 0000 0000 0001 | 1 | Stop the process      |
