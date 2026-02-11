@@ -34,8 +34,8 @@ There are two main control modes available in the system:
 |---------- |----------     |---------- |
 | 0x00      | Heartbear Protocol | Read/Write |  
 | 0x01      | Base System Status | Write      | - 
-| 0x02      | Vacuum Status      | Read/Write?| -
-| 0x03      | Gripper Movement Status    | Read/Write?| -
+| 0x02      | Gripper Status      | Read/Write | -
+| 0x03      | Gripper Movement Status    | Read/Write| -
 | 0x04      | Gripper Movement Actual Status    | Read | -
 | 0x05      | Gripper Activate toggle    | Write | 
 | 0x10      | Theta Moving Status | Read |
@@ -73,6 +73,8 @@ Controls the gripper actuator (Grip / Release).
 | ----- | ----- | ----- | ----- |
 | 0   | 0000 0000 0000 0000 | 0 = Release | Gripper `Release` |
 | 0   | 0000 0000 0000 0001 | 1 = Grip | Gripper `Grip` |
+| 0   | 0000 0000 0000 0010 | 2 = Pick | Gripper `Pick` |
+| 0   | 0000 0000 0000 0011 | 3 = Place | Gripper `Place` |
 
 
 #### 3. Gripper Movement Status (0x03)
