@@ -1,5 +1,6 @@
 import platform 
 import struct
+import time
 from pymodbus.client import ModbusSerialClient as ModbusClient
 from pymodbus.client import ModbusTcpClient
 
@@ -84,7 +85,7 @@ class Protocol(Binary):
         self.routine_normal = True
 
         # Base system status (0x01)
-
+        self.base_system_status_register = 0b0000
         
         # Gripper status (0x02) -- 0: Release, 1: Grip
         self.gripper_status = "0"
@@ -123,20 +124,22 @@ class Protocol(Binary):
         self.stop_process = "0"
 
         # Modbus Client
-        self.client = ModbusClient(method='rtu', port=self.port, stopbits=1, bitsize=8, polarity='E', baudrate=115200)
+        self.client = ModbusClient(method='rtu', port=self.port, stopbits=1, bitsize=8, parity='E', baudrate=19200)
         print("[Protocol] Operating System:", self.os, "| Port:", self.port, self.client.connect())
 
     # ============================= Heartbeat Functions (0x00) =============================
     def heartbeat(self):
-        if self.read_heartbear() == 22881:
+        if self.read_heartbear() == 1111:
             self.write_heartbeat()
+            print("[Protocol] Heartbeat successful")
             return True
         else:
+            print("[Protocol] Heartbeat failed")
             return False
 
     def read_heartbear(self):
         try:
-            hearbeat_value = self.client.read_holding_registers(address=0x00, count=1, slave=1).registers
+            hearbeat_value = self.client.read_holding_registers(address=0x00, count=1, slave=self.slave_address).registers
         except Exception as e:
             print(f"[Protocol] Error reading heartbeat: {e}")
             return 0    
@@ -145,6 +148,7 @@ class Protocol(Binary):
     def write_heartbeat(self):
         try:
             self.client.write_register(address=0x00, value=18537, slave=self.slave_address)
+            print("[Protocol] Write Heartbeat: 18537")
             self.usb_connect = True
         except:
             self.usb_connect = False
@@ -152,9 +156,36 @@ class Protocol(Binary):
     # ============================= Routine Function =============================
     def routine(self):
         try: 
-            self.register = self.client.read_holding_registers(address=0x01, count=66, slave=self.slave_address).registers
-            # Routine for reading registers
+            self.register = self.client.read_holding_registers(address=0x00, count=66, slave=self.slave_address)
+            # IMPORTANT: handle Modbus errors
+            if self.register is None or self.register.isError():
+                print(f"[Protocol] read_holding_registers error: {self.register}")
+                self.routine_normal = False
+                return
+            print(f"[Protocol] Register Values: {self.register.registers[:]}")
 
+            # self.write_gripper_command("Place") # (0x02)
+            # self.write_gripper_movement("Forward")  # (0x03)
+            # self.write_gripper_checkbox("Enable")  # (0x05)
+
+            # print(self.moving_status)
+
+            # Routine for reading registers
+            self.read_gripper_actual_status()   # gripper status (0x02 - 0x04)
+            self.read_theta_moving_status()     # theta moving status (0x10)
+            self.read_theta_actual_status()     # theta actual status (0x11 - 0x13)
+            self.read_emergency_stop_status()   # emergency stop status (0x40)
+
+            # print(f"[Protocol] Gripper Status: {self.gripper_status} | Gripper Movement Status: {self.gripper_moving_status}")
+
+            # print(f"[Protocol] Gripper Status: {self.gripper_status} | Gripper Movement Status: {self.gripper_moving_status} | "
+            #         f"Gripper Actual Reed Status: {self.gripper_actual_reed1}, {self.gripper_actual_reed2}, {self.gripper_actual_reed3} | "
+            #         f"Theta Moving Status: {self.moving_status} | Theta Actual Position: {self.theta_actual_pos} | "
+            #         f"Theta Actual Speed: {self.thata_actual_speed} | Theta Actual Accel: {self.theta_actual_accel} | "
+            #         f"Emergency Stop Status: {self.emergency_stop_status}")
+
+            # self.heartbeat()  # Write heartbeat at the end of the routine
+            
             self.routine_normal = True
         except Exception as e:
             print(f"[Protocol] Error in routine: {e}")
@@ -169,6 +200,8 @@ class Protocol(Binary):
             self.base_system_status_register = 0b0010
         elif command == 'Auto':
             self.base_system_status_register = 0b0100
+        # else:
+        #     self.base_system_status_register = 0b0000
         self.client.write_register(address=0x01, value=self.base_system_status_register, slave=self.slave_address)
         print(f"[Protocol] Write Base System Status: {command} | Register: {self.base_system_status_register}")
 
@@ -194,15 +227,16 @@ class Protocol(Binary):
         self.client.write_register(address=0x03, value=self.gripper_movement_register, slave=self.slave_address)
         print(f"[Protocol] Write Gripper Movement: {command} | Register: {self.gripper_movement_register}")
 
-    # ============================= Read Register Functions (0x04) =============================
+    # ============================= Read Register Functions (0x02-0x04) =============================
     def read_gripper_actual_status(self):
-        gripper_state_binary = self.binary_crop(4, self.decimal_to_binary(self.register[0x02]))[::-1]
-        gripper_movement_binary = self.binary_crop(4, self.decimal_to_binary(self.register[0x03]))[::-1]
-
+        gripper_state_binary = self.binary_to_decimal(self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x02])))
+        gripper_movement_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x03]))[::-1]
+        
         # Reed switch status
-        gripper_actual_status_binary = self.binary_crop(4, self.decimal_to_binary(self.register[0x04]))[::-1]
+        gripper_actual_status_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x04]))[::-1]
+        # print(f"[Protocol] Gripper Actual Status Binary: {gripper_actual_status_binary}")
 
-        self.gripper_status = gripper_state_binary[0]  # Gripper Status
+        self.gripper_status = gripper_state_binary  # Gripper Status
         self.gripper_moving_status = gripper_movement_binary[0]  # Gripper Movement Status
 
         self.gripper_actual_reed1 = gripper_actual_status_binary[0]  # Reed Switch 1 Status
@@ -221,7 +255,9 @@ class Protocol(Binary):
     # ============================= Read Register Functions (0x10) =============================
     def read_theta_moving_status(self):
         self.moving_status_previous = self.moving_status
-        moving_status_binary = self.binary_crop(6, self.decimal_to_binary(self.register[0x10]))[::-1]
+        moving_status_binary = self.binary_crop(6, self.decimal_to_binary(self.register.registers[0x10]))[::-1]
+    
+        # moving_status_binary = ['0', '1','0','0']
         if moving_status_binary[0] == '1':
             self.moving_status = "Homing"
         elif moving_status_binary[1] == '1':
@@ -235,18 +271,13 @@ class Protocol(Binary):
 
     # ============================= Read Register Functions (0x11 - 0x13) =============================
     def read_theta_actual_status(self):
-        self.theta_actual_pos = self.binary_reverse_twos_complement(self.register[0x11]) / 10.0
-        self.theta_actual_speed = self.register[0x12] / 10.0
-        self.theta_actual_accel = self.register[0x13] / 10.0
+        self.theta_actual_pos = self.binary_reverse_twos_complement(self.register.registers[0x11]) / 10.0
+        self.theta_actual_speed = self.register.registers[0x12] / 10.0
+        self.theta_actual_accel = self.register.registers[0x13] / 10.0
 
     # ============================= Write Register Functions (0x30) =============================
     # Manual Movement - Goal Point
     def write_goal_point(self, mode='', value=None):
-        """
-        This function writes the goal point to the register
-        mode: 'Index' or 'Position'
-        value: int (for 'Index') or float (for 'Position') - Positive(CCW), Negative(CW)
-        """
         if mode == 'Index':
             self.goal_point_register = self.binary_twos_complement(int(value))
         elif mode == 'Position':
@@ -255,16 +286,11 @@ class Protocol(Binary):
 
     # ============================= Write Register Functions (0x31) =============================
     def write_point_to_point(self, mode='', value=None, repeat=0):
-        """
-        This function writes the point to point movement to the register
-        mode: 'Index' or 'Position'
-        value: int (for 'Index') or float (for 'Position') - Positive(CCW), Negative(CW)
-        """
         self.write_goal_point(mode, value)
         self.client.write_register(address=0x31, value=repeat, slave=self.slave_address)
 
     def read_emergency_stop_status(self):
-        emergency_stop_binary = self.binary_crop(4, self.decimal_to_binary(self.register[0x40]))[::-1]
+        emergency_stop_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x40]))[::-1]
         self.emergency_stop_status = emergency_stop_binary[0]  # Emergency Stop Status
 
     def write_stop_process(self, command):

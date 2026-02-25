@@ -8,6 +8,7 @@ class ModbusUI(tk.Tk):
         super().__init__()
         self.title("Modbus RTU Tester 101")
         self.geometry("600x320")
+        self.temp = 0
 
         frm = ttk.Frame(self, padding=10)
         frm.pack(fill="both", expand=True)
@@ -47,9 +48,10 @@ class ModbusUI(tk.Tk):
         # Buttons
         btns = ttk.Frame(frm)
         btns.grid(row=6, column=0, columnspan=2, pady=10, sticky="ew")
-
+        
         ttk.Button(btns, text="Read", command=self.read_register).pack(side="left", padx=5)
         ttk.Button(btns, text="Write", command=self.write_register).pack(side="left", padx=5)
+
 
         # Log
         self.log_box = tk.Text(frm, height=8)
