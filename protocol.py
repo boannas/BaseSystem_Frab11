@@ -2,11 +2,11 @@ import platform
 import struct
 import time
 from pymodbus.client import ModbusSerialClient as ModbusClient
-from pymodbus.client import ModbusTcpClient
+# from pymodbus.client import ModbusTcpClient
 
 # ============================= Congif Computer port here  ==============================
 
-device_port = "COM3"
+# device_port = "COM3"
 # example: for os -> device_port = "/dev/cu.usbmodem14103"
 #          for window -> device_port = "COM3"
 # =======================================================================================
@@ -68,18 +68,20 @@ class Protocol(Binary):
     """
     def __init__(self):
         self.os = platform.platform()[0].upper()
-        if self.os == 'M': #Mac
-            self.port = device_port
-        elif self.os == 'W': #Windows        
-            self.port = device_port
+        # if self.os == 'M': #Mac
+        #     self.port = device_port
+        # elif self.os == 'W': #Windows        
+        #     self.port = device_port
+        self.port = None
+        self.client = None
 
         # Modbus Client
         self.usb_connect = False
         self.usb_connect_before = False
 
         # Modbus TCP Client
-        self.slave_address = False
-        self.register = []
+        self.slave_address = 21  # Modbus slave address
+        self.register = None
 
         # Routine
         self.routine_normal = True
@@ -123,21 +125,55 @@ class Protocol(Binary):
         # Stop the process (0x41) -- 0: Normal, 1: Stop
         self.stop_process = "0"
 
-        # Modbus Client
-        self.client = ModbusClient(method='rtu', port=self.port, stopbits=1, bitsize=8, parity='E', baudrate=19200)
-        print("[Protocol] Operating System:", self.os, "| Port:", self.port, self.client.connect())
+    def connect_rtu(self, com_port: str, slave: int = 21) -> bool:
+            """Create + connect Modbus RTU client."""
+            self.slave_address = slave
+            self.port = com_port
+
+            # close existing client if any
+            self.disconnect()
+            print(com_port, slave)
+
+            self.client = ModbusClient(
+                port=com_port,
+                baudrate=19200,
+                parity="E",
+                stopbits=1,
+                bytesize=8,
+                timeout=1,
+                retries=1,
+            )
+            ok = self.client.connect()
+            self.usb_connect = bool(ok)
+            return bool(ok)
+
+    def disconnect(self):
+        if self.client:
+            try:
+                self.client.close()
+            except Exception:
+                pass
+        self.client = None
+        self.usb_connect = False
+
+    def is_connected(self) -> bool:
+        return bool(self.client) and bool(getattr(self.client, "connected", False))
+
+
+
+
 
     # ============================= Heartbeat Functions (0x00) =============================
-    def heartbeat(self):
-        if self.read_heartbear() == 1111:
-            self.write_heartbeat()
-            print("[Protocol] Heartbeat successful")
-            return True
-        else:
-            print("[Protocol] Heartbeat failed")
-            return False
+    # def heartbeat(self):
+    #     if self.read_heartbear() == 1111:
+    #         self.write_heartbeat()
+    #         print("[Protocol] Heartbeat successful")
+    #         return True
+    #     else:
+    #         print("[Protocol] Heartbeat failed")
+    #         return False
 
-    def read_heartbear(self):
+    def read_heartbeat(self):
         try:
             hearbeat_value = self.client.read_holding_registers(address=0x00, count=1, slave=self.slave_address).registers
         except Exception as e:
@@ -150,56 +186,45 @@ class Protocol(Binary):
             self.client.write_register(address=0x00, value=18537, slave=self.slave_address)
             print("[Protocol] Write Heartbeat: 18537")
             self.usb_connect = True
+            return True
         except:
             self.usb_connect = False
+            return False
 
     # ============================= Routine Function =============================
     def routine(self):
-        try: 
-            self.register = self.client.read_holding_registers(address=0x00, count=66, slave=self.slave_address)
-            # IMPORTANT: handle Modbus errors
-            if self.register is None or self.register.isError():
-                print(f"[Protocol] read_holding_registers error: {self.register}")
-                self.routine_normal = False
-                return
-            print(f"[Protocol] Register Values: {self.register.registers[:]}")
 
-            # self.write_gripper_command("Place") # (0x02)
-            # self.write_gripper_movement("Forward")  # (0x03)
-            # self.write_gripper_checkbox("Enable")  # (0x05)
-
-            # print(self.moving_status)
-
-            # Routine for reading registers
-            self.read_gripper_actual_status()   # gripper status (0x02 - 0x04)
-            self.read_theta_moving_status()     # theta moving status (0x10)
-            self.read_theta_actual_status()     # theta actual status (0x11 - 0x13)
-            self.read_emergency_stop_status()   # emergency stop status (0x40)
-
-            # print(f"[Protocol] Gripper Status: {self.gripper_status} | Gripper Movement Status: {self.gripper_moving_status}")
-
-            # print(f"[Protocol] Gripper Status: {self.gripper_status} | Gripper Movement Status: {self.gripper_moving_status} | "
-            #         f"Gripper Actual Reed Status: {self.gripper_actual_reed1}, {self.gripper_actual_reed2}, {self.gripper_actual_reed3} | "
-            #         f"Theta Moving Status: {self.moving_status} | Theta Actual Position: {self.theta_actual_pos} | "
-            #         f"Theta Actual Speed: {self.thata_actual_speed} | Theta Actual Accel: {self.theta_actual_accel} | "
-            #         f"Emergency Stop Status: {self.emergency_stop_status}")
-
-            # self.heartbeat()  # Write heartbeat at the end of the routine
-            
-            self.routine_normal = True
-        except Exception as e:
-            print(f"[Protocol] Error in routine: {e}")
+        if not self.client:
             self.routine_normal = False
+            return False
+        
+        rr = self.client.read_holding_registers(address=0x00, count=66, slave=self.slave_address)
+        if rr is None or rr.isError() or not hasattr(rr, "registers"):
+            self.routine_normal = False
+            return False 
+        # print(f"[Protocol] Register Values: {rr.registers[:]}")
+        
+        self.register = rr
+        # Routine for reading registers
+        self.read_gripper_actual_status()   # gripper status (0x02 - 0x04)
+        self.read_theta_moving_status()     # theta moving status (0x10)
+        self.read_theta_actual_status()     # theta actual status (0x11 - 0x13)
+        self.read_emergency_stop_status()   # emergency stop status (0x40)
+        self.routine_normal = True
+        return True
+
 
 
     # ============================= Write Register Functions (0x01) =============================
     def write_base_system_status(self, command):
-        if command == 'Home':
+        if command == 'go_home':
             self.base_system_status_register = 0b0001   
         elif command == 'Jog':
             self.base_system_status_register = 0b0010
         elif command == 'Auto':
             self.base_system_status_register = 0b0100
+        elif command == 'set_home':
+            self.base_system_status_register = 0b1000
         # else:
         #     self.base_system_status_register = 0b0000
         self.client.write_register(address=0x01, value=self.base_system_status_register, slave=self.slave_address)
