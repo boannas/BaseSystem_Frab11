@@ -11,7 +11,7 @@ from pymodbus.client import ModbusSerialClient as ModbusClient
 #          for window -> device_port = "COM3"
 # =======================================================================================
 
-
+MAX_ADDRESS = 0x34
 
 class Binary():
     """
@@ -109,7 +109,7 @@ class Protocol(Binary):
 
         # Theta Moving Status (0x11 - 0x13) 
         self.theta_actual_pos = 0.0
-        self.thata_actual_speed = 0.0
+        self.theta_actual_speed = 0.0
         self.theta_actual_accel = 0.0
 
         # Pick and Place Status (0x20)
@@ -198,7 +198,7 @@ class Protocol(Binary):
             self.routine_normal = False
             return False
         
-        rr = self.client.read_holding_registers(address=0x00, count=66, slave=self.slave_address)
+        rr = self.client.read_holding_registers(address=0x00, count=MAX_ADDRESS+1, slave=self.slave_address)
         if rr is None or rr.isError() or not hasattr(rr, "registers"):
             self.routine_normal = False
             return False 
@@ -209,7 +209,7 @@ class Protocol(Binary):
         self.read_gripper_actual_status()   # gripper status (0x02 - 0x04)
         self.read_theta_moving_status()     # theta moving status (0x10)
         self.read_theta_actual_status()     # theta actual status (0x11 - 0x13)
-        self.read_emergency_stop_status()   # emergency stop status (0x34)
+        self.read_emergency_stop_status()   # emergency stop status (0x33)
         self.routine_normal = True
         return True
 
@@ -265,9 +265,9 @@ class Protocol(Binary):
         # self.gripper_status = gripper_state_binary  # Gripper Status [0x02]
         # self.gripper_moving_status = gripper_movement_binary[0]  # Gripper Movement Status [0x03]
 
-        self.gripper_actual_reed1 = gripper_actual_status_binary[0]  # Reed Switch 1 Status [0x04]
-        self.gripper_actual_reed2 = gripper_actual_status_binary[1]  # Reed Switch 2 Status [0x04]
-        self.gripper_actual_reed3 = gripper_actual_status_binary[2]  # Reed Switch 3 Status [0x04]
+        self.gripper_actual_reed1 = (gripper_actual_status_binary[0] == '1') # Reed Switch 1 Status [0x04]
+        self.gripper_actual_reed2 = (gripper_actual_status_binary[1] == '1') # Reed Switch 2 Status [0x04]
+        self.gripper_actual_reed3 = (gripper_actual_status_binary[2] == '1') # Reed Switch 3 Status [0x04]
 
     # ============================= Write Register Functions (0x05) =============================
     def write_gripper_checkbox(self, command):
@@ -379,7 +379,7 @@ class Protocol(Binary):
     # ============================= Write Register Functions (0x33) =============================
     def read_emergency_stop_status(self):
         emergency_stop_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x33]))[::-1]
-        self.emergency_stop_status = emergency_stop_binary[0]  # Emergency Stop Status
+        self.emergency_stop_status = (emergency_stop_binary[0] == '1')  # Emergency Stop Status
 
     # ============================= Write Register Functions (0x34) =============================
     def write_stop_process(self, command):

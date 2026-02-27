@@ -6,14 +6,15 @@ from websockets.exceptions import ConnectionClosed
 from protocol import Protocol
 import time
 
-# One Protocol instance owns Modbus + decode logic
+# Modbus Protocol
 protocol = Protocol()
 
-# Keep only what the websocket server needs
+# Server state
 server_state = {
     "stats_task": None,   
 }
 
+# Robot stats
 robot_state = {
     "position": "--",
     "speed": "--",
@@ -73,6 +74,7 @@ async def stats_loop(websocket):
                             robot_state["gripper_jaw"] = "Open"
                         else:
                             robot_state["gripper_jaw"] = "Idle"
+
             payload = {
                 "type": "STATS",
                 "pos": robot_state["position"],
@@ -174,55 +176,75 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
             # ---------------- HOME ----------------
             if req_mode == "Home":
                 if action == "go_home": # 0x01
-                    await asyncio.to_thread(protocol.write_base_system_status, "go_home")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_base_system_status, "go_home")
                     continue
 
                 elif action == "set_home": #0x01
-                    await asyncio.to_thread(protocol.write_base_system_status, "set_home")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_base_system_status, "set_home")
                     continue
 
             # ---------------- MANUAL / JOG ----------------
             elif req_mode == "Manual":
                 if action == "set_manual":  # 0x01
-                    await asyncio.to_thread(protocol.write_base_system_status, "Jog")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_base_system_status, "Jog")
                     continue
 
                 # 0x03
                 elif action == "gripper_up":
                     print("gripper_up")
-                    await asyncio.to_thread(protocol.write_gripper_movement, "Up")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_gripper_movement, "Up")
+                    continue
+
                 elif action == "gripper_down":
                     print("gripper_down")
-                    await asyncio.to_thread(protocol.write_gripper_movement, "Down")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_gripper_movement, "Down")
+                    continue
 
                 # 0x02
                 elif action == "gripper_open":
                     print("gripper_open")
-                    await asyncio.to_thread(protocol.write_gripper_command, "Open")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_gripper_command, "Open")
+                    continue
+
                 elif action == "gripper_close":
                     print("gripper_close")
-                    await asyncio.to_thread(protocol.write_gripper_command, "Close")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_gripper_command, "Close")
+                    continue
+
                 elif action == "gripper_pick":
                     print("gripper_pick")
-                    await asyncio.to_thread(protocol.write_gripper_command, "Pick")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_gripper_command, "Pick")
+                    continue
+
                 elif action == "gripper_place":
                     print("gripper_place")
-                    await asyncio.to_thread(protocol.write_gripper_command, "Place")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_gripper_command, "Place")
+                    continue
                 
                 # 0x14
                 elif action == 'jog':
                     print('Jog', data.get('value'), data.get('direction'))
                     value = data.get('value')
                     direction = '+' if data.get('direction') == 'CCW' else '-'
-
                     jog_value = int(str(direction) + str(value))
-                    await asyncio.to_thread(protocol.write_jog, jog_value)
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_jog, jog_value)
                     continue
 
             # ---------------- AUTO ----------------
             elif req_mode == "Auto":
                 if action == 'set_auto':
-                    await asyncio.to_thread(protocol.write_base_system_status, "Auto")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_base_system_status, "Auto")
                     continue
 
                 if action == "pick_place":
@@ -232,32 +254,42 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     gripper_enable = (data.get('use_gripper'))   
 
                     if gripper_enable:  # 0x05
-                        await asyncio.to_thread(protocol.write_gripper_checkbox, 'Enable')
+                        async with modbus_lock:
+                            await asyncio.to_thread(protocol.write_gripper_checkbox, 'Enable')
+                        continue
+
                     else:
-                        await asyncio.to_thread(protocol.write_gripper_checkbox, 'Disable')
-                    # continue
+                        async with modbus_lock:
+                            await asyncio.to_thread(protocol.write_gripper_checkbox, 'Disable')
+                        continue
 
                 
                 elif action == 'point_to_point':    
                     print("point", data.get('value'), data.get('unit'))
                     p2p_unit = data.get('unit')
                     p2p_value = data.get('value')
-                    await asyncio.to_thread(protocol.write_p2p_unit, p2p_unit)      # 0x31
-                    await asyncio.to_thread(protocol.write_p2p_value, p2p_value)    # 0x32
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_p2p_unit, p2p_unit)      # 0x31
+                        await asyncio.to_thread(protocol.write_p2p_value, p2p_value)    # 0x32
+                    continue
 
             # ---------------- TEST ----------------
             elif req_mode == "Test":
                 if action == "set_test":
-                    await asyncio.to_thread(protocol.write_base_system_status, "Test")
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_base_system_status, "Test")
                     continue
+
                 elif action == "performance": 
                     print('perform', data.get('speed'), data.get('accel') )
                     speed_test = data.get('speed')
                     accel_test = data.get('accel')
 
-                    await asyncio.to_thread(protocol.write_test_mode, 'Performance')    # 0x15
-                    await asyncio.to_thread(protocol.write_test_speed, speed_test)      # 0x16
-                    await asyncio.to_thread(protocol.write_test_accel, accel_test)      # 0x17
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_test_mode, 'Performance')    # 0x15
+                        await asyncio.to_thread(protocol.write_test_speed, speed_test)      # 0x16
+                        await asyncio.to_thread(protocol.write_test_accel, accel_test)      # 0x17
+                    continue
 
                 elif action == "precision":
                     print('preci', data.get('init_pos'), data.get('tar_pos'), data.get('repeat'), data.get('unit'))
@@ -268,17 +300,20 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     
                     unit_sign = '+' if unit_test == 'degree' else '-'
                     repeat_w_unit = int(str(unit_sign) + str(repeat_test))
+                    async with modbus_lock:
+                        await asyncio.to_thread(protocol.write_test_mode, 'Precision')      # 0x15
+                        await asyncio.to_thread(protocol.write_test_init_pos, init_pos_test)        # 0x18
+                        await asyncio.to_thread(protocol.write_test_target_pos, target_pos_test)    # 0x19
+                        await asyncio.to_thread(protocol.write_test_repeat, repeat_w_unit)          # 0x20
+                    continue
 
-                    await asyncio.to_thread(protocol.write_test_mode, 'Precision')      # 0x15
-                    await asyncio.to_thread(protocol.write_test_init_pos, init_pos_test)        # 0x18
-                    await asyncio.to_thread(protocol.write_test_target_pos, target_pos_test)    # 0x19
-                    await asyncio.to_thread(protocol.write_test_repeat, repeat_w_unit)          # 0x20
-                    
             # # ---------------- STOP ----------------
             elif req_mode == "Stop" and action == 'stop':
                 print('ssssttttttooooopppp')
-                await asyncio.to_thread(protocol.write_stop_process, 'Stop')    # 0x34
-                
+                async with modbus_lock:
+                    await asyncio.to_thread(protocol.write_stop_process, 'Stop')    # 0x34
+                continue
+
             else : 
                 print(f"[ERROR] Can't recog{req_mode}")
 
@@ -292,15 +327,11 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
     except websockets.exceptions.ConnectionClosed:
         print("Frontend client disconnected.")
     finally:
-        # Always stop stats loop for this websocket
         stats_task.cancel()
         try:
             await stats_task
         except asyncio.CancelledError:
             pass
-        # Keep Modbus connected across UI reconnects (recommended)
-        # If you want to disconnect Modbus when UI closes, uncomment:
-        # await asyncio.to_thread(protocol.disconnect)
 
 
 async def main():
