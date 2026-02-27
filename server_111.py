@@ -24,7 +24,6 @@ robot_state = {
     "emergency": "Idle",
 }
 
-aaa = 0
 
 modbus_lock = asyncio.Lock()
 
@@ -43,11 +42,10 @@ async def stats_loop(websocket):
                     read_latency = read_end - read_start
 
                     if ok:
-                        # print(protocol.register.registers[:11])
+                        print(protocol.register.registers[0x30:0x36])
 
                         # Pos/vel/Acc [0x11 to 0x13]
                         robot_state["position"] = protocol.theta_actual_pos
-                        # robot_state["position"] = int(robot_state["position"]) + 50
                         robot_state["speed"] = protocol.theta_actual_speed
                         robot_state["accel"] = protocol.theta_actual_accel
 
@@ -173,60 +171,113 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                 }))
                 continue
 
-            # # ---------------- HOME / MODE ----------------
+            # ---------------- HOME ----------------
             if req_mode == "Home":
-                if action == "go_home":
+                if action == "go_home": # 0x01
                     await asyncio.to_thread(protocol.write_base_system_status, "go_home")
-                    await websocket.send(json.dumps({
-                        "mode": "Home",
-                        "action": "go_home",
-                        "status": "success"}))
                     continue
 
-                elif action == "set_home":
+                elif action == "set_home": #0x01
                     await asyncio.to_thread(protocol.write_base_system_status, "set_home")
-                    await websocket.send(json.dumps({
-                        "mode": "Set home",
-                        "action": "set_home",
-                        "status": "success"}))
                     continue
 
-
-
+            # ---------------- MANUAL / JOG ----------------
             elif req_mode == "Manual":
-                if action == "gripper_up":
+                if action == "set_manual":  # 0x01
+                    await asyncio.to_thread(protocol.write_base_system_status, "Jog")
+                    continue
+
+                # 0x03
+                elif action == "gripper_up":
                     print("gripper_up")
+                    await asyncio.to_thread(protocol.write_gripper_movement, "Up")
                 elif action == "gripper_down":
                     print("gripper_down")
+                    await asyncio.to_thread(protocol.write_gripper_movement, "Down")
+
+                # 0x02
                 elif action == "gripper_open":
                     print("gripper_open")
+                    await asyncio.to_thread(protocol.write_gripper_command, "Open")
                 elif action == "gripper_close":
                     print("gripper_close")
+                    await asyncio.to_thread(protocol.write_gripper_command, "Close")
                 elif action == "gripper_pick":
                     print("gripper_pick")
+                    await asyncio.to_thread(protocol.write_gripper_command, "Pick")
                 elif action == "gripper_place":
                     print("gripper_place")
-                elif action == 'jog':
-                    print('jooooogggg', data.get('value'), data.get('direction'))
-                    aaa += int(data.get('value'))
-
+                    await asyncio.to_thread(protocol.write_gripper_command, "Place")
                 
+                # 0x14
+                elif action == 'jog':
+                    print('Jog', data.get('value'), data.get('direction'))
+                    value = data.get('value')
+                    direction = '+' if data.get('direction') == 'CCW' else '-'
+
+                    jog_value = int(str(direction) + str(value))
+                    await asyncio.to_thread(protocol.write_jog, jog_value)
+                    continue
+
+            # ---------------- AUTO ----------------
             elif req_mode == "Auto":
+                if action == 'set_auto':
+                    await asyncio.to_thread(protocol.write_base_system_status, "Auto")
+                    continue
+
                 if action == "pick_place":
                     print('pp', data.get('sequence'), data.get('directions'), data.get('use_gripper'))
+                    order_sequence = data.get('sequence')
+                    direction_sequence = data.get('directions')
+                    gripper_enable = (data.get('use_gripper'))   
 
-                elif action == 'point_to_point':
+                    if gripper_enable:  # 0x05
+                        await asyncio.to_thread(protocol.write_gripper_checkbox, 'Enable')
+                    else:
+                        await asyncio.to_thread(protocol.write_gripper_checkbox, 'Disable')
+                    # continue
+
+                
+                elif action == 'point_to_point':    
                     print("point", data.get('value'), data.get('unit'))
+                    p2p_unit = data.get('unit')
+                    p2p_value = data.get('value')
+                    await asyncio.to_thread(protocol.write_p2p_unit, p2p_unit)      # 0x31
+                    await asyncio.to_thread(protocol.write_p2p_value, p2p_value)    # 0x32
 
-
+            # ---------------- TEST ----------------
             elif req_mode == "Test":
-                if action == "performance":
+                if action == "set_test":
+                    await asyncio.to_thread(protocol.write_base_system_status, "Test")
+                    continue
+                elif action == "performance": 
                     print('perform', data.get('speed'), data.get('accel') )
+                    speed_test = data.get('speed')
+                    accel_test = data.get('accel')
+
+                    await asyncio.to_thread(protocol.write_test_mode, 'Performance')    # 0x15
+                    await asyncio.to_thread(protocol.write_test_speed, speed_test)      # 0x16
+                    await asyncio.to_thread(protocol.write_test_accel, accel_test)      # 0x17
+
                 elif action == "precision":
                     print('preci', data.get('init_pos'), data.get('tar_pos'), data.get('repeat'), data.get('unit'))
+                    init_pos_test = data.get('init_pos')
+                    target_pos_test = data.get('tar_pos')
+                    repeat_test = data.get('repeat')
+                    unit_test = data.get('unit')
+                    
+                    unit_sign = '+' if unit_test == 'degree' else '-'
+                    repeat_w_unit = int(str(unit_sign) + str(repeat_test))
 
+                    await asyncio.to_thread(protocol.write_test_mode, 'Precision')      # 0x15
+                    await asyncio.to_thread(protocol.write_test_init_pos, init_pos_test)        # 0x18
+                    await asyncio.to_thread(protocol.write_test_target_pos, target_pos_test)    # 0x19
+                    await asyncio.to_thread(protocol.write_test_repeat, repeat_w_unit)          # 0x20
+                    
+            # # ---------------- STOP ----------------
             elif req_mode == "Stop" and action == 'stop':
                 print('ssssttttttooooopppp')
+                await asyncio.to_thread(protocol.write_stop_process, 'Stop')    # 0x34
                 
             else : 
                 print(f"[ERROR] Can't recog{req_mode}")

@@ -33,40 +33,44 @@ There are two main control modes available in the system:
 | Address   | Description   | Operation |
 |---------- |----------     |---------- |
 | 0x00      | Heartbear Protocol | Read/Write |  
-| 0x01      | Base System Status | Write      | - 
-| 0x02      | Gripper Status      | Read/Write | -
-| 0x03      | Gripper Movement Status    | Read/Write| -
-| 0x04      | Gripper Movement Actual Status    | Read | -
-| 0x05      | Gripper Activate toggle    | Write | 
-| 0x10      | Theta Moving Status | Read |
-| 0x11      | Theta Actual Position | Read |
-| 0x12      | Theta Actual Velocity | Read |
-| 0x13      | Theta Actual Acceleration | Read |
-<!-- | 0x21      | Pick Order         | Write | 
-| 0x22      | Place Order        | Write |
-| 0x23      | 1st Hole Position | Read |
-| 0x25      | 2nd Hole Position | Read |
-| 0x26      | 3rd Hole Position | Read |
-| 0x27      | 4th Hole Position | Read |
-| 0x28      | 5th Hole Position | Read |
-| 0x30      | Goal Point (Hole/deg) | Write |
-| 0x40      | Emergency status  | Read |
-| 0x41      | Stop the process  | Write | -->
+| 0x01      | Base System Status [OK] | Write      | - 
+| 0x02      | Gripper Status     [OK] | Read/Write | -
+| 0x03      | Gripper Movement Status  [OK]  | Read/Write| -
+| 0x04      | Gripper Movement Actual Status  [OK]  | Read | -
+| 0x05      | Gripper Activate toggle [OK]    | Write | 
+| 0x10      | Theta Moving Status [MAYBE] | Read |
+| 0x11      | Theta Actual Position [OK]| Read |
+| 0x12      | Theta Actual Velocity [OK]| Read |
+| 0x13      | Theta Actual Acceleration [OK]| Read |
+| 0x14      | Jog Mode (Command) [OK]   | Write |
+| 0x15      | Test Mode (Performance/Precision) [OK]| Write|
+| 0x16      | (Test)Performance - Speed  [OK] | Write |
+| 0x17      | (Test)Performance - Accel  [OK] | Write |
+| 0x18      | (Test)Precision - Init pos [OK] | Write |
+| 0x19      | (Test)Precision - Target pos [OK]| Write |
+| 0x20      | (Test)Precision - # Repeat (sign = unit) [OK] | Write  |
+| 0x21-0x25 | Pick Hole #1-#5 (sign = direction) | Write |
+| 0x26-0x30 | Place Hole #1-#5 (sign = direction) | Write | 
+| 0x31      | Point to Point (unit)  [OK]  | Write | 
+| 0x32      | Point to Point (value) [OK] | Write |
+| 0x33      | Emergency status [OK]  | Read |
+| 0x34      | Stop the process  [OK] | Write | 
 ---
 
 ### Data Format
-#### 1. Base System Status (0x01) <span style="color:#d73a49;font-weight:bold">[NOT YET]</span>
+#### 1. Base System Status (0x01) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
 Controls the robot’s high-level operating mode and system actions, such as homing, manual operation, or autonomous execution.
 
 | Bit | Data in Binary | Data in Decimal | Description                                     |
 | --- | -------------------- | ------- | ----------------------------------------------- |
-| 0   | 0000 0000 0000 0001  | 1       | **Home Mode** – Execute homing    [OK]     |
+| 0   | 0000 0000 0000 0001  | 1       | **Home Mode** – Execute homing         |
 | 1   | 0000 0000 0000 0010  | 2       | **Manual Mode** – Entered Jog / manual control          |
 | 2   | 0000 0000 0000 0100  | 4       | **Autonomous Mode** – Entered to automatic Mode|
-| 3   | 0000 0000 0000 1000  | 8       | **Set Home** – Execute home setting    [OK]|
+| 3   | 0000 0000 0000 1000  | 8       | **Set Home** – Execute home setting    |
+| 3   | 0000 0000 0001 0000  | 16       | **Test Mode** – Entered Test mode|
 
 
-#### 2. Gripper Status (0x02) <span style="color:#d73a49;font-weight:bold">[NOT YET]</span>
+#### 2. Gripper Status (0x02) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
 Controls the gripper actuator (Grip / Release).
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
@@ -77,13 +81,13 @@ Controls the gripper actuator (Grip / Release).
 | 0   | 0000 0000 0000 0011 | 3 = Place | Gripper `Place` |
 
 
-#### 3. Gripper Movement Status (0x03) <span style="color:#d73a49;font-weight:bold">[NOT YET]</span>
+#### 3. Gripper Movement Status (0x03) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
 Commands the gripper linear movement direction.
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000 = Backward | 0 = Backward | Backward movement |
-| 0   | 0000 0000 0000 0001 = Forward  | 1 = Forward  | Forward movement  |
+| 0   | 0000 0000 0000 0000  | 0 = Up | Backward movement |
+| 0   | 0000 0000 0000 0001   | 1 = Down  | Forward movement  |
 
 
 #### 4. Gripper Movement Actual Status (0x04) <span style="color:#2ea043;font-weight:bold">[DONE]</span>

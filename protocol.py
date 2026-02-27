@@ -209,7 +209,7 @@ class Protocol(Binary):
         self.read_gripper_actual_status()   # gripper status (0x02 - 0x04)
         self.read_theta_moving_status()     # theta moving status (0x10)
         self.read_theta_actual_status()     # theta actual status (0x11 - 0x13)
-        self.read_emergency_stop_status()   # emergency stop status (0x40)
+        self.read_emergency_stop_status()   # emergency stop status (0x34)
         self.routine_normal = True
         return True
 
@@ -225,16 +225,17 @@ class Protocol(Binary):
             self.base_system_status_register = 0b0100
         elif command == 'set_home':
             self.base_system_status_register = 0b1000
-        # else:
-        #     self.base_system_status_register = 0b0000
+        elif command == 'Test':
+            self.base_system_status_register = 0b10000
+
         self.client.write_register(address=0x01, value=self.base_system_status_register, slave=self.slave_address)
         print(f"[Protocol] Write Base System Status: {command} | Register: {self.base_system_status_register}")
 
     # ============================= Write Register Functions (0x02) =============================
     def write_gripper_command(self, command):
-        if command == 'Release':
+        if command == 'Open':
             self.gripper_command_register = 0b0000   
-        elif command == 'Grip':
+        elif command == 'Close':
             self.gripper_command_register = 0b0001
         elif command == 'Pick':
             self.gripper_command_register = 0b0010
@@ -245,9 +246,9 @@ class Protocol(Binary):
 
     # ============================= Write Register Functions (0x03) =============================
     def write_gripper_movement(self, command):
-        if command == 'Backward':
+        if command == 'Up':
             self.gripper_movement_register = 0b0000   
-        elif command == 'Forward':
+        elif command == 'Down':
             self.gripper_movement_register = 0b0001
         self.client.write_register(address=0x03, value=self.gripper_movement_register, slave=self.slave_address)
         print(f"[Protocol] Write Gripper Movement: {command} | Register: {self.gripper_movement_register}")
@@ -305,28 +306,86 @@ class Protocol(Binary):
         self.theta_actual_speed = self.binary_reverse_twos_complement(self.register.registers[0x12]) / 10.0
         self.theta_actual_accel = self.binary_reverse_twos_complement(self.register.registers[0x13]) / 10.0
 
-    # ============================= Write Register Functions (0x30) =============================
-    # Manual Movement - Goal Point
-    def write_goal_point(self, mode='', value=None):
-        if mode == 'Index':
-            self.goal_point_register = self.binary_twos_complement(int(value))
-        elif mode == 'Position':
-            self.goal_point_register = self.binary_twos_complement(int(value * 10))
-        self.client.write_register(address=0x30, value=self.goal_point_register, slave=self.slave_address)
+    # ============================= Write Register Functions (0x14) =============================
+    # Jog Movement - Goal Point
+    def write_jog(self, value=None):
+        self.jog_degree = self.binary_twos_complement(value)
+        self.client.write_register(address=0x14, value=self.jog_degree, slave=self.slave_address)
+
+    # ============================= Write Register Functions (0x15) =============================
+    def write_test_mode(self, mode=None):
+        if mode == "Performance":
+            self.test_mode = 1
+        elif mode == "Precision" :
+            self.test_mode = 0 
+        self.client.write_register(address=0x15, value=self.test_mode, slave=self.slave_address)
+        print(f"[Protocol] Write test mode: {mode} | Register: {self.test_mode}")
+
+    # ============================= Write Register Functions (0x16) =============================
+    def write_test_speed(self, value=None):
+        self.test_speed = self.binary_twos_complement(value)
+        self.client.write_register(address=0x16, value=self.test_speed, slave=self.slave_address)
+        print(f"[Protocol] Write test speed: {value} | Register: {self.test_speed}")
+
+    # ============================= Write Register Functions (0x17) =============================
+    def write_test_accel(self, value=None):
+        self.test_accel = self.binary_twos_complement(value)
+        self.client.write_register(address=0x17, value=self.test_accel, slave=self.slave_address)
+        print(f"[Protocol] Write test accel: {value} | Register: {self.test_accel}")
+
+    # ============================= Write Register Functions (0x18) =============================
+    def write_test_init_pos(self, init_pos=None):
+        self.test_init_pos = self.binary_twos_complement(init_pos)
+        self.client.write_register(address=0x18, value=self.test_init_pos, slave=self.slave_address)
+        print()
+
+    # ============================= Write Register Functions (0x19) =============================
+    def write_test_target_pos(self, target_pos=None):
+        self.test_target_pos = self.binary_twos_complement(target_pos)
+        self.client.write_register(address=0x19, value=self.test_target_pos, slave=self.slave_address)
+        print()
+
+    # ============================= Write Register Functions (0x20) =============================
+    def write_test_repeat(self, repeat=None):
+        self.test_repeat_w_unit = self.binary_twos_complement(repeat)
+        self.client.write_register(address=0x20, value=self.test_repeat_w_unit, slave=self.slave_address)
+        print()    
+
+
+    # ============================= Write Register Functions (0x21 - 0x25) =============================
+
+    def write_pick_hole(self, pick_order, direction):
+
+        pass
+    # ============================= Write Register Functions (0x26 - 0x30) =============================
+    def write_place_hole(self, place_order, direction):
+        pass
 
     # ============================= Write Register Functions (0x31) =============================
-    def write_point_to_point(self, mode='', value=None, repeat=0):
-        self.write_goal_point(mode, value)
-        self.client.write_register(address=0x31, value=repeat, slave=self.slave_address)
+    def write_p2p_unit(self, unit=None):
+        if unit == 'degree':
+            self.p2p_unit = 0b0000 
+        elif unit == 'index':
+            self.p2p_unit = 0b0001
+        self.client.write_register(address=0x31, value=self.p2p_unit, slave=self.slave_address)
+    
 
+    # ============================= Write Register Functions (0x32) =============================
+    def write_p2p_value(self, value=None):
+        self.p2p_value = self.binary_twos_complement(value)
+        self.client.write_register(address=0x32, value=self.p2p_value, slave=self.slave_address)
+
+
+    # ============================= Write Register Functions (0x33) =============================
     def read_emergency_stop_status(self):
-        emergency_stop_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x40]))[::-1]
+        emergency_stop_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x33]))[::-1]
         self.emergency_stop_status = emergency_stop_binary[0]  # Emergency Stop Status
 
+    # ============================= Write Register Functions (0x34) =============================
     def write_stop_process(self, command):
         if command == 'Normal':
             self.stop_process_register = 0b0000   
         elif command == 'Stop':
             self.stop_process_register = 0b0001
-        self.client.write_register(address=0x41, value=self.stop_process_register, slave=self.slave_address)
+        self.client.write_register(address=0x34, value=self.stop_process_register, slave=self.slave_address)
         print(f"[Protocol] Write Stop Process: {command} | Register: {self.stop_process_register}")
