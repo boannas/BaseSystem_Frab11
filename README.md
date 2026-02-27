@@ -107,7 +107,8 @@ reed#3 ON == CLOSE else UP
 | 2   | 0000 0000 0000 0100 | 0 / 4 | Lead Switch 3 (0 = Off, 1 = On) |
 
 
-#### 5. Gripper checkbox (0x05) <span style="color:#d73a49;font-weight:bold">[NOT YET]</span>
+#### 5. Gripper checkbox (0x05) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
+
 Gripper checkbox = enable / disable gripper actuation
 - 'ON' -> Robot motion + gripper actions work
 - 'OFF' -> Robot motion works, gripper does nothing
