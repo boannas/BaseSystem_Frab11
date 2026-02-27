@@ -261,12 +261,12 @@ class Protocol(Binary):
         gripper_actual_status_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x04]))[::-1]
         # print(f"[Protocol] Gripper Actual Status Binary: {gripper_actual_status_binary}")
 
-        self.gripper_status = gripper_state_binary  # Gripper Status
-        self.gripper_moving_status = gripper_movement_binary[0]  # Gripper Movement Status
+        # self.gripper_status = gripper_state_binary  # Gripper Status [0x02]
+        # self.gripper_moving_status = gripper_movement_binary[0]  # Gripper Movement Status [0x03]
 
-        self.gripper_actual_reed1 = gripper_actual_status_binary[0]  # Reed Switch 1 Status
-        self.gripper_actual_reed2 = gripper_actual_status_binary[1]  # Reed Switch 2 Status
-        self.gripper_actual_reed3 = gripper_actual_status_binary[2]  # Reed Switch 3 Status
+        self.gripper_actual_reed1 = gripper_actual_status_binary[0]  # Reed Switch 1 Status [0x04]
+        self.gripper_actual_reed2 = gripper_actual_status_binary[1]  # Reed Switch 2 Status [0x04]
+        self.gripper_actual_reed3 = gripper_actual_status_binary[2]  # Reed Switch 3 Status [0x04]
 
     # ============================= Write Register Functions (0x05) =============================
     def write_gripper_checkbox(self, command):
@@ -281,8 +281,8 @@ class Protocol(Binary):
     def read_theta_moving_status(self):
         self.moving_status_previous = self.moving_status
         moving_status_binary = self.binary_crop(6, self.decimal_to_binary(self.register.registers[0x10]))[::-1]
-    
-        # moving_status_binary = ['0', '1','0','0']
+        
+        # moving_status_binary = ['0', '1', '0', '0']
         if moving_status_binary[0] == '1':
             self.moving_status = "Homing"
         elif moving_status_binary[1] == '1':
@@ -296,9 +296,14 @@ class Protocol(Binary):
 
     # ============================= Read Register Functions (0x11 - 0x13) =============================
     def read_theta_actual_status(self):
+        # data must convert to 1 decimal point 
+        # self.register.registers[0x11] = 64302 (-1234)
+        # self.register.registers[0x12] = 1234 (1234)
+        # self.register.registers[0x13] = 61215 (-4321)
+
         self.theta_actual_pos = self.binary_reverse_twos_complement(self.register.registers[0x11]) / 10.0
-        self.theta_actual_speed = self.register.registers[0x12] / 10.0
-        self.theta_actual_accel = self.register.registers[0x13] / 10.0
+        self.theta_actual_speed = self.binary_reverse_twos_complement(self.register.registers[0x12]) / 10.0
+        self.theta_actual_accel = self.binary_reverse_twos_complement(self.register.registers[0x13]) / 10.0
 
     # ============================= Write Register Functions (0x30) =============================
     # Manual Movement - Goal Point

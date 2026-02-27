@@ -24,6 +24,8 @@ robot_state = {
     "emergency": "Idle",
 }
 
+aaa = 0
+
 modbus_lock = asyncio.Lock()
 
 async def stats_loop(websocket):
@@ -41,15 +43,38 @@ async def stats_loop(websocket):
                     read_latency = read_end - read_start
 
                     if ok:
-                        print(protocol.register.registers[:11])
+                        # print(protocol.register.registers[:11])
+
+                        # Pos/vel/Acc [0x11 to 0x13]
                         robot_state["position"] = protocol.theta_actual_pos
+                        # robot_state["position"] = int(robot_state["position"]) + 50
                         robot_state["speed"] = protocol.theta_actual_speed
                         robot_state["accel"] = protocol.theta_actual_accel
-                        robot_state["emergency"] = protocol.emergency_stop_status
-                        robot_state["mode"] = protocol.moving_status
-                        robot_state["gripper_z"] = protocol.gripper_actual_reed1
-                        robot_state["gripper_jaw"] = protocol.gripper_actual_reed3
 
+
+                        robot_state["emergency"] = protocol.emergency_stop_status
+
+                        # Theta moving status [0x10]
+                        robot_state["mode"] = protocol.moving_status
+
+                        # Check state gripper [0x04]
+                        reed1 = protocol.gripper_actual_reed1
+                        reed2 = protocol.gripper_actual_reed2
+                        reed3 = protocol.gripper_actual_reed3
+
+                        # gripper Z direction 
+                        if reed1 != reed2:
+                            robot_state["gripper_z"] = "Up" if reed1 else "Down"
+                        else:
+                            robot_state["gripper_z"] = "Idle"
+
+                        # gripper jaw
+                        if reed3 is True:
+                            robot_state["gripper_jaw"] = "Close"
+                        elif reed3 is False:
+                            robot_state["gripper_jaw"] = "Open"
+                        else:
+                            robot_state["gripper_jaw"] = "Idle"
             payload = {
                 "type": "STATS",
                 "pos": robot_state["position"],
@@ -79,7 +104,7 @@ async def stats_loop(websocket):
             #         f"Read: {read_latency*1000:.2f} ms | "
             #         f"Send: {send_latency*1000:.2f} ms"
             #     )
-            last_loop_time = loop_end
+            # last_loop_time = loop_end
             # await asyncio.sleep(0.1)
     except asyncio.CancelledError:
         pass
@@ -127,15 +152,12 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
 
             req_mode = data.get("mode")
             action = data.get("action")
-            # print(f"Received command: mode={req_mode}, action={action}")
-            print(data)
+            # print(data)
             # ---------------- CONNECT / DISCONNECT ----------------
             if req_mode == "Connect" and action == "connect_port":
                 port_num = data.get("port")
                 com_port = f"COM{port_num}"
                 slave = int(data.get("slave", 21))
-
-                # ok = await asyncio.to_thread(protocol.connect_rtu, com_port, slave)
 
                 async with modbus_lock:
                     if protocol.client and protocol.is_connected() and protocol.port == com_port and protocol.slave_address == slave:
@@ -155,85 +177,60 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
             if req_mode == "Home":
                 if action == "go_home":
                     await asyncio.to_thread(protocol.write_base_system_status, "go_home")
-                    await websocket.send(json.dumps({"mode": "Home", "status": "success"}))
+                    await websocket.send(json.dumps({
+                        "mode": "Home",
+                        "action": "go_home",
+                        "status": "success"}))
                     continue
+
                 elif action == "set_home":
                     await asyncio.to_thread(protocol.write_base_system_status, "set_home")
-                    await websocket.send(json.dumps({"mode": "Set home", "status": "success"}))
+                    await websocket.send(json.dumps({
+                        "mode": "Set home",
+                        "action": "set_home",
+                        "status": "success"}))
                     continue
 
-            # if req_mode == "Mode" and action == "set":
-            #     # Example: "Jog" / "Auto"
-            #     value = data.get("value")
-            #     if value not in ("Home", "Jog", "Auto"):
-            #         await websocket.send(json.dumps({"mode": "Mode", "status": "failed", "message": "Invalid mode"}))
-            #         continue
-            #     await asyncio.to_thread(protocol.write_base_system_status, value)
-            #     await websocket.send(json.dumps({"mode": "Mode", "status": "success", "value": value}))
-            #     continue
 
-            # # ---------------- STOP ----------------
-            # if req_mode == "Stop" and action == "stop":
-            #     await asyncio.to_thread(protocol.write_stop_process, "Stop")
-            #     await websocket.send(json.dumps({"mode": "Stop", "status": "success"}))
-            #     continue
 
-            # if req_mode == "Stop" and action == "normal":
-            #     await asyncio.to_thread(protocol.write_stop_process, "Normal")
-            #     await websocket.send(json.dumps({"mode": "Stop", "status": "success"}))
-            #     continue
+            elif req_mode == "Manual":
+                if action == "gripper_up":
+                    print("gripper_up")
+                elif action == "gripper_down":
+                    print("gripper_down")
+                elif action == "gripper_open":
+                    print("gripper_open")
+                elif action == "gripper_close":
+                    print("gripper_close")
+                elif action == "gripper_pick":
+                    print("gripper_pick")
+                elif action == "gripper_place":
+                    print("gripper_place")
+                elif action == 'jog':
+                    print('jooooogggg', data.get('value'), data.get('direction'))
+                    aaa += int(data.get('value'))
 
-            # # ---------------- GRIPPER ----------------
-            # if req_mode == "Gripper" and action == "checkbox":
-            #     # value: "Enable" or "Disable"
-            #     value = data.get("value", "Disable")
-            #     if value not in ("Enable", "Disable"):
-            #         await websocket.send(json.dumps({"mode": "Gripper", "status": "failed", "message": "Invalid value"}))
-            #         continue
-            #     await asyncio.to_thread(protocol.write_gripper_checkbox, value)
-            #     await websocket.send(json.dumps({"mode": "Gripper", "status": "success"}))
-            #     continue
+                
+            elif req_mode == "Auto":
+                if action == "pick_place":
+                    print('pp', data.get('sequence'), data.get('directions'), data.get('use_gripper'))
 
-            # if req_mode == "Gripper" and action == "command":
-            #     # value: "Release" / "Grip" / "Pick" / "Place"
-            #     value = data.get("value")
-            #     if value not in ("Release", "Grip", "Pick", "Place"):
-            #         await websocket.send(json.dumps({"mode": "Gripper", "status": "failed", "message": "Invalid command"}))
-            #         continue
-            #     await asyncio.to_thread(protocol.write_gripper_command, value)
-            #     await websocket.send(json.dumps({"mode": "Gripper", "status": "success"}))
-            #     continue
+                elif action == 'point_to_point':
+                    print("point", data.get('value'), data.get('unit'))
 
-            # if req_mode == "Gripper" and action == "movement":
-            #     # value: "Forward" / "Backward"
-            #     value = data.get("value")
-            #     if value not in ("Forward", "Backward"):
-            #         await websocket.send(json.dumps({"mode": "Gripper", "status": "failed", "message": "Invalid movement"}))
-            #         continue
-            #     await asyncio.to_thread(protocol.write_gripper_movement, value)
-            #     await websocket.send(json.dumps({"mode": "Gripper", "status": "success"}))
-            #     continue
 
-            # # ---------------- MANUAL / PTP ----------------
-            # if req_mode == "Manual" and action == "ptp":
-            #     # ptp_mode: "Index" or "Position"
-            #     ptp_mode = data.get("ptp_mode", "Position")
-            #     value = data.get("value", 0)
-            #     repeat = int(data.get("repeat", 0))
+            elif req_mode == "Test":
+                if action == "performance":
+                    print('perform', data.get('speed'), data.get('accel') )
+                elif action == "precision":
+                    print('preci', data.get('init_pos'), data.get('tar_pos'), data.get('repeat'), data.get('unit'))
 
-            #     if ptp_mode not in ("Index", "Position"):
-            #         await websocket.send(json.dumps({"mode": "Manual", "status": "failed", "message": "Invalid ptp_mode"}))
-            #         continue
+            elif req_mode == "Stop" and action == 'stop':
+                print('ssssttttttooooopppp')
+                
+            else : 
+                print(f"[ERROR] Can't recog{req_mode}")
 
-            #     try:
-            #         value_f = float(value)
-            #     except Exception:
-            #         await websocket.send(json.dumps({"mode": "Manual", "status": "failed", "message": "Invalid value"}))
-            #         continue
-
-            #     await asyncio.to_thread(protocol.write_point_to_point, ptp_mode, value_f, repeat)
-            #     await websocket.send(json.dumps({"mode": "Manual", "status": "success"}))
-            #     continue
 
             # ---------------- FALLBACK ----------------
             await websocket.send(json.dumps({

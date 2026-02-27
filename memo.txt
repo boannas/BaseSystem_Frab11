@@ -1,0 +1,11 @@
+1. run docker (for the interface)
+2. run server_111.py (for the server + Backend)
+
+
+DONE
+<span style="color:#2ea043;font-weight:bold">[DONE]</span>
+
+
+NOT YET
+<span style="color:#d73a49;font-weight:bold">[NOT YET]</span>
+
