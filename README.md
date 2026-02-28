@@ -32,13 +32,13 @@ There are two main control modes available in the system:
 
 | Address   | Description   | Operation |
 |---------- |----------     |---------- |
-| 0x00      | Heartbear Protocol | Read/Write |  
+| 0x00      | Heartbear Protocol [NEED_ASK] Read/Write |  
 | 0x01      | Base System Status [OK] | Write      | - 
 | 0x02      | Gripper Status     [OK] | Read/Write | -
 | 0x03      | Gripper Movement Status  [OK]  | Read/Write| -
 | 0x04      | Gripper Movement Actual Status  [OK]  | Read | -
 | 0x05      | Gripper Activate toggle [OK]    | Write | 
-| 0x10      | Theta Moving Status [MAYBE] | Read |
+| 0x10      | Theta Moving Status [EED_AS] | Read |
 | 0x11      | Theta Actual Position [OK]| Read |
 | 0x12      | Theta Actual Velocity [OK]| Read |
 | 0x13      | Theta Actual Acceleration [OK]| Read |
@@ -49,8 +49,8 @@ There are two main control modes available in the system:
 | 0x18      | (Test)Precision - Init pos [OK] | Write |
 | 0x19      | (Test)Precision - Target pos [OK]| Write |
 | 0x20      | (Test)Precision - # Repeat (sign = unit) [OK] | Write  |
-| 0x21-0x25 | Pick Hole #1-#5 (sign = direction) | Write |
-| 0x26-0x30 | Place Hole #1-#5 (sign = direction) | Write | 
+| 0x21-0x25 | Pick Hole #1-#5 (sign = direction) [NOT_YET] | Write |
+| 0x26-0x30 | Place Hole #1-#5 (sign = direction) [NOT_YET] | Write | 
 | 0x31      | Point to Point (unit)  [OK]  | Write | 
 | 0x32      | Point to Point (value) [OK] | Write |
 | 0x33      | Emergency status [OK]  | Read |

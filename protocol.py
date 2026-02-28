@@ -13,6 +13,10 @@ from pymodbus.client import ModbusSerialClient as ModbusClient
 
 MAX_ADDRESS = 0x34
 
+HB_ADDR = 0x00      # Heartbeat address
+HB_HI = 18537       # HI 
+HB_YA = 22881       # YA
+
 class Binary():
     """
     Binary Class
@@ -112,18 +116,13 @@ class Protocol(Binary):
         self.theta_actual_speed = 0.0
         self.theta_actual_accel = 0.0
 
-        # Pick and Place Status (0x20)
-        self.shelve_1 = 0
-        self.shelve_2 = 0
-        self.shelve_3 = 0
-        self.shelve_4 = 0
-        self.shelve_5 = 0
-
         # Emergency Stop Status (0x40) -- 0: Normal, 1: Emergency Stop
         self.emergency_stop_status = "0" 
 
         # Stop the process (0x41) -- 0: Normal, 1: Stop
         self.stop_process = "0"
+
+        self.hb_val = None
 
     def connect_rtu(self, com_port: str, slave: int = 21) -> bool:
             """Create + connect Modbus RTU client."""
@@ -164,36 +163,87 @@ class Protocol(Binary):
 
 
     # ============================= Heartbeat Functions (0x00) =============================
-    # def heartbeat(self):
-    #     if self.read_heartbear() == 1111:
-    #         self.write_heartbeat()
-    #         print("[Protocol] Heartbeat successful")
+    # # def heartbeat(self):
+    # #     if self.read_heartbear() == 1111:
+    # #         self.write_heartbeat()
+    # #         print("[Protocol] Heartbeat successful")
+    # #         return True
+    # #     else:
+    # #         print("[Protocol] Heartbeat failed")
+    # #         return False
+
+    # def read_heartbeat(self):
+    #     try:
+    #         hearbeat_value = self.client.read_holding_registers(address=0x00, count=1, slave=self.slave_address).registers
+    #     except Exception as e:
+    #         print(f"[Protocol] Error reading heartbeat: {e}")
+    #         return 0    
+    #     return hearbeat_value[0]        
+
+    # def write_heartbeat(self):
+    #     try:
+    #         self.client.write_register(address=0x00, value=18537, slave=self.slave_address)
+    #         print("[Protocol] Write Heartbeat: 18537")
+    #         self.usb_connect = True
     #         return True
-    #     else:
-    #         print("[Protocol] Heartbeat failed")
+    #     except:
+    #         self.usb_connect = False
     #         return False
 
-    def read_heartbeat(self):
-        try:
-            hearbeat_value = self.client.read_holding_registers(address=0x00, count=1, slave=self.slave_address).registers
-        except Exception as e:
-            print(f"[Protocol] Error reading heartbeat: {e}")
-            return 0    
-        return hearbeat_value[0]        
+    # def read_heartbeat(self) -> int | None:
+    #     rr = self.client.read_holding_registers(address=0x00, count=1, slave=self.slave_address)
+    #     if rr is None or rr.isError() or not hasattr(rr, "registers"):
+    #         return None
+    #     return rr.registers[0]
 
-    def write_heartbeat(self):
-        try:
-            self.client.write_register(address=0x00, value=18537, slave=self.slave_address)
-            print("[Protocol] Write Heartbeat: 18537")
-            self.usb_connect = True
-            return True
-        except:
-            self.usb_connect = False
+    def write_heartbeat_hi(self) -> bool:
+        wr = self.client.write_register(address=0x00, value=HB_HI, slave=self.slave_address)
+        if wr is None or (hasattr(wr, "isError") and wr.isError()):
             return False
+        return True
+    
+    import time
 
+    # def heartbeat_handshake(self, ack_timeout: float = 0.15, poll_interval: float = 0.01) -> tuple[bool, float | None, int | None]:
+    #     """
+    #     Returns (ok, latency_sec, last_value).
+    #     ok=True means: saw Ya -> wrote Hi -> saw Ya again within ack_timeout.
+    #     """
+    #     t0 = time.perf_counter()
+
+    #     v0 = self.read_heartbeat()
+    #     if v0 is None:
+    #         return False, None, None
+
+    #     # only start handshake if robot is in Ya state
+    #     if v0 != HB_YA:
+    #         return False, None, v0
+
+    #     if not self.write_heartbeat_hi():
+    #         return False, None, v0
+
+    #     deadline = time.perf_counter() + ack_timeout
+    #     while time.perf_counter() < deadline:
+    #         v1 = self.read_heartbeat()
+    #         if v1 == HB_YA:
+    #             return True, (time.perf_counter() - t0), v1
+    #         # time.sleep(poll_interval)
+
+    #     return False, None, v0
+    
+    def heartbeat_from_routine(self):
+        hb = getattr(self, "hb_val", None)
+        if hb is None:
+            return False, None
+
+        if hb == HB_YA:
+            ok = self.write_heartbeat_hi()   # FC06 only
+            return bool(ok), hb
+
+        return False, hb
+    
     # ============================= Routine Function =============================
     def routine(self):
-
         if not self.client:
             self.routine_normal = False
             return False
@@ -204,6 +254,8 @@ class Protocol(Binary):
             return False 
         # print(f"[Protocol] Register Values: {rr.registers[:]}")
         
+        self.hb_val = rr.registers[0]
+
         self.register = rr
         # Routine for reading registers
         self.read_gripper_actual_status()   # gripper status (0x02 - 0x04)
