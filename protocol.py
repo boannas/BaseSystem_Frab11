@@ -1,19 +1,9 @@
 import platform 
-import struct
-import time
 from pymodbus.client import ModbusSerialClient as ModbusClient
-# from pymodbus.client import ModbusTcpClient
 
-# ============================= Congif Computer port here  ==============================
-
-# device_port = "COM3"
-# example: for os -> device_port = "/dev/cu.usbmodem14103"
-#          for window -> device_port = "COM3"
-# =======================================================================================
 
 MAX_ADDRESS = 0x34
 
-HB_ADDR = 0x00      # Heartbeat address
 HB_HI = 18537       # HI 
 HB_YA = 22881       # YA
 
@@ -67,28 +57,20 @@ class Binary():
 
 
 class Protocol(Binary):
-    """
-    Protocol Theta robot Class
-    """
     def __init__(self):
-        self.os = platform.platform()[0].upper()
-        # if self.os == 'M': #Mac
-        #     self.port = device_port
-        # elif self.os == 'W': #Windows        
-        #     self.port = device_port
         self.port = None
         self.client = None
 
         # Modbus Client
         self.usb_connect = False
-        self.usb_connect_before = False
-
-        # Modbus TCP Client
         self.slave_address = 21  # Modbus slave address
         self.register = None
 
         # Routine
         self.routine_normal = True
+
+        # Heartbeat (0x00)
+        self.hb_val = None
 
         # Base system status (0x01)
         self.base_system_status_register = 0b0000
@@ -122,7 +104,6 @@ class Protocol(Binary):
         # Stop the process (0x41) -- 0: Normal, 1: Stop
         self.stop_process = "0"
 
-        self.hb_val = None
 
     def connect_rtu(self, com_port: str, slave: int = 21) -> bool:
             """Create + connect Modbus RTU client."""
@@ -131,7 +112,7 @@ class Protocol(Binary):
 
             # close existing client if any
             self.disconnect()
-            print(com_port, slave)
+            # print(com_port, slave)
 
             self.client = ModbusClient(
                 port=com_port,
@@ -158,78 +139,12 @@ class Protocol(Binary):
     def is_connected(self) -> bool:
         return bool(self.client) and bool(getattr(self.client, "connected", False))
 
-
-
-
-
     # ============================= Heartbeat Functions (0x00) =============================
-    # # def heartbeat(self):
-    # #     if self.read_heartbear() == 1111:
-    # #         self.write_heartbeat()
-    # #         print("[Protocol] Heartbeat successful")
-    # #         return True
-    # #     else:
-    # #         print("[Protocol] Heartbeat failed")
-    # #         return False
-
-    # def read_heartbeat(self):
-    #     try:
-    #         hearbeat_value = self.client.read_holding_registers(address=0x00, count=1, slave=self.slave_address).registers
-    #     except Exception as e:
-    #         print(f"[Protocol] Error reading heartbeat: {e}")
-    #         return 0    
-    #     return hearbeat_value[0]        
-
-    # def write_heartbeat(self):
-    #     try:
-    #         self.client.write_register(address=0x00, value=18537, slave=self.slave_address)
-    #         print("[Protocol] Write Heartbeat: 18537")
-    #         self.usb_connect = True
-    #         return True
-    #     except:
-    #         self.usb_connect = False
-    #         return False
-
-    # def read_heartbeat(self) -> int | None:
-    #     rr = self.client.read_holding_registers(address=0x00, count=1, slave=self.slave_address)
-    #     if rr is None or rr.isError() or not hasattr(rr, "registers"):
-    #         return None
-    #     return rr.registers[0]
-
     def write_heartbeat_hi(self) -> bool:
         wr = self.client.write_register(address=0x00, value=HB_HI, slave=self.slave_address)
         if wr is None or (hasattr(wr, "isError") and wr.isError()):
             return False
         return True
-    
-    import time
-
-    # def heartbeat_handshake(self, ack_timeout: float = 0.15, poll_interval: float = 0.01) -> tuple[bool, float | None, int | None]:
-    #     """
-    #     Returns (ok, latency_sec, last_value).
-    #     ok=True means: saw Ya -> wrote Hi -> saw Ya again within ack_timeout.
-    #     """
-    #     t0 = time.perf_counter()
-
-    #     v0 = self.read_heartbeat()
-    #     if v0 is None:
-    #         return False, None, None
-
-    #     # only start handshake if robot is in Ya state
-    #     if v0 != HB_YA:
-    #         return False, None, v0
-
-    #     if not self.write_heartbeat_hi():
-    #         return False, None, v0
-
-    #     deadline = time.perf_counter() + ack_timeout
-    #     while time.perf_counter() < deadline:
-    #         v1 = self.read_heartbeat()
-    #         if v1 == HB_YA:
-    #             return True, (time.perf_counter() - t0), v1
-    #         # time.sleep(poll_interval)
-
-    #     return False, None, v0
     
     def heartbeat_from_routine(self):
         hb = getattr(self, "hb_val", None)
@@ -252,11 +167,12 @@ class Protocol(Binary):
         if rr is None or rr.isError() or not hasattr(rr, "registers"):
             self.routine_normal = False
             return False 
-        # print(f"[Protocol] Register Values: {rr.registers[:]}")
-        
-        self.hb_val = rr.registers[0]
 
         self.register = rr
+
+        # Heartbeat        
+        self.hb_val = rr.registers[0]
+        
         # Routine for reading registers
         self.read_gripper_actual_status()   # gripper status (0x02 - 0x04)
         self.read_theta_moving_status()     # theta moving status (0x10)
@@ -307,16 +223,11 @@ class Protocol(Binary):
 
     # ============================= Read Register Functions (0x02-0x04) =============================
     def read_gripper_actual_status(self):
-        gripper_state_binary = self.binary_to_decimal(self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x02])))
-        gripper_movement_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x03]))[::-1]
+        # gripper_state_binary = self.binary_to_decimal(self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x02])))
+        # gripper_movement_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x03]))[::-1]
         
         # Reed switch status
         gripper_actual_status_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x04]))[::-1]
-        # print(f"[Protocol] Gripper Actual Status Binary: {gripper_actual_status_binary}")
-
-        # self.gripper_status = gripper_state_binary  # Gripper Status [0x02]
-        # self.gripper_moving_status = gripper_movement_binary[0]  # Gripper Movement Status [0x03]
-
         self.gripper_actual_reed1 = (gripper_actual_status_binary[0] == '1') # Reed Switch 1 Status [0x04]
         self.gripper_actual_reed2 = (gripper_actual_status_binary[1] == '1') # Reed Switch 2 Status [0x04]
         self.gripper_actual_reed3 = (gripper_actual_status_binary[2] == '1') # Reed Switch 3 Status [0x04]
@@ -407,7 +318,6 @@ class Protocol(Binary):
     # ============================= Write Register Functions (0x21 - 0x25) =============================
 
     def write_pick_hole(self, pick_order, direction):
-
         pass
     # ============================= Write Register Functions (0x26 - 0x30) =============================
     def write_place_hole(self, place_order, direction):

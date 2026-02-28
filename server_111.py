@@ -25,92 +25,17 @@ robot_state = {
     "emergency": "Idle",
 }
 
-HB_PERIOD = 0.2
-HB_ACK_TIMEOUT = 0.15
-HB_POLL_INTERVAL = 0.01
-HB_DEAD_TIMEOUT = 0.8
-
+HB_DEAD_TIMEOUT = 0.8   
 HB_HI = 18537       # HI 
 HB_YA = 22881       # YA
 
 modbus_lock = asyncio.Lock()
 
-# async def stats_loop(websocket):
-#     last_hb_ok_time = 0.0
-#     try:
-#         while True:
-#             hb_ok = False
-#             hb_latency = None
-#             hb_val = None
-#             ok = False
-
-#             if protocol.client and protocol.is_connected():
-#                 async with modbus_lock:
-#                     # 1 Heartbeat handshake
-#                     hb_ok, hb_latency, hb_val = await asyncio.to_thread(
-#                         protocol.heartbeat_handshake, 
-#                         HB_ACK_TIMEOUT, 
-#                         HB_POLL_INTERVAL
-#                     )
-#                     print(hb_ok, hb_latency, hb_val)
-#                     # 2 read stats only after heartbeat success
-#                     if hb_ok:
-#                         last_hb_ok_time = time.perf_counter()                    
-#                         ok = await asyncio.to_thread(protocol.routine)
-
-#                         if ok:
-#                             # print(protocol.register.registers[0x30:0x36])
-#                             robot_state["position"] = protocol.theta_actual_pos
-#                             robot_state["speed"] = protocol.theta_actual_speed
-#                             robot_state["accel"] = protocol.theta_actual_accel
-#                             robot_state["emergency"] = protocol.emergency_stop_status
-#                             robot_state["mode"] = protocol.moving_status
-
-#                             # Check state gripper [0x04]
-#                             reed1 = protocol.gripper_actual_reed1
-#                             reed2 = protocol.gripper_actual_reed2
-#                             reed3 = protocol.gripper_actual_reed3
-
-#                             # gripper Z direction 
-#                             robot_state["gripper_z"] = (
-#                                 "Up" if (reed1 and not reed2) else
-#                                 "Down" if (reed2 and not reed1) else
-#                                 "Idle"
-#                             )
-
-#                             # gripper jaw
-#                             if reed3 is True:
-#                                 robot_state["gripper_jaw"] = "Close"
-#                             elif reed3 is False:
-#                                 robot_state["gripper_jaw"] = "Open"
-#                             else:
-#                                 robot_state["gripper_jaw"] = "Idle"
-#             dt = time.perf_counter() - last_hb_ok_time
-#             alive = dt <= HB_DEAD_TIMEOUT
-#             connected = bool(protocol.client) and protocol.is_connected() and alive
-#             print(dt)
-
-#             payload = {
-#                 "type": "STATS",
-#                 "pos": robot_state["position"],
-#                 "speed": robot_state["speed"],
-#                 "accel": robot_state["accel"],
-#                 "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
-#                 "mode": robot_state["mode"],
-#                 "emergency": robot_state["emergency"],
-#                 "connected": connected,
-#             }
-#             try:
-#                 await websocket.send(json.dumps(payload))
-#             except ConnectionClosed:
-#                 break
 async def stats_loop(websocket):
     last_seen_ya_time = 0.0
     try:
         while True:
             ok = False
-            sent_hi = False
-            hb_val = None
 
             if protocol.client and protocol.is_connected():
                 async with modbus_lock:
@@ -119,6 +44,10 @@ async def stats_loop(websocket):
 
                     if ok:
                         hb_val = protocol.hb_val
+                        if hb_val == HB_YA:
+                            last_seen_ya_time = time.perf_counter()
+                            sent_hi, _ = await asyncio.to_thread(protocol.heartbeat_from_routine)
+                        
                         print(protocol.register.registers)
                         # print(protocol.register.registers[0x30:0x36])
                         robot_state["position"] = protocol.theta_actual_pos
@@ -146,12 +75,8 @@ async def stats_loop(websocket):
                             robot_state["gripper_jaw"] = "Open"
                         else:
                             robot_state["gripper_jaw"] = "Idle"
-
-                        
-
             
             dt = time.perf_counter() - last_seen_ya_time
-            # print(dt)
             alive = dt <= HB_DEAD_TIMEOUT
             connected = bool(protocol.client) and protocol.is_connected() and alive
 
@@ -164,17 +89,13 @@ async def stats_loop(websocket):
                 "mode": robot_state["mode"],
                 "emergency": robot_state["emergency"],
                 "connected": connected,
-                # "hb": hb_val,
-                # "sent_hi": sent_hi,
             }
 
             try:
                 await websocket.send(json.dumps(payload))
             except ConnectionClosed:
                 break
-            # print(dt)
-            # await asyncio.sleep(0.2)   # your heartbeat period
-                # await asyncio.sleep(HB_PERIOD)
+            # await asyncio.sleep(HB_PERIOD)
     except asyncio.CancelledError:
         pass
 
@@ -221,13 +142,11 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
 
             req_mode = data.get("mode")
             action = data.get("action")
-            # print(data)
             # ---------------- CONNECT / DISCONNECT ----------------
             if req_mode == "Connect" and action == "connect_port":
                 port_num = data.get("port")
                 com_port = f"COM{port_num}"
                 slave = int(data.get("slave", 21))
-
                 async with modbus_lock:
                     if protocol.client and protocol.is_connected() and protocol.port == com_port and protocol.slave_address == slave:
                         ok = True
@@ -331,7 +250,6 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                         async with modbus_lock:
                             await asyncio.to_thread(protocol.write_gripper_checkbox, 'Disable')
                         continue
-
                 
                 elif action == 'point_to_point':    
                     print("point", data.get('value'), data.get('unit'))
@@ -385,7 +303,6 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
 
             else : 
                 print(f"[ERROR] Can't recog{req_mode}")
-
 
             # ---------------- FALLBACK ----------------
             await websocket.send(json.dumps({

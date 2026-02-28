@@ -2,8 +2,74 @@
 The Base System with user interfce for FRA263/264 (Robotics Studio III)
 
 ## Installation
+### Requirements
+- Python 3.10+ (recommended)
+- STM32 connected via USB
+- Modbus RTU settings must match firmware: 19200 baud, 8 data bits, even parity, 1 stop bit (8E1)
+
+### Setup Virtual Environment 
+1. Clone the repository
+```
+git clone xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+cd xxxxxxxx
+```
+
+2. Create Virtual Environment
+```
+python -m venv venv
+venv\Scripts\activate
+```
+
+3. Install Dependencies from requirements.txt
+Make sure your requirements.txt contains:
+```
+pymodbus>=3.3.0
+websockets>=16.0
+pyserial>=3.5
+```
+
+Then run 
+```
+pip install -r requirements.txt
+```
+
+Verify installation
+```
+pip list
+```
+
+you should see `pymodbus`, `websockets` and `pyserial`
+
+5. Run Backend
+```
+python server.py
+```
+
+you should see like this `WebSocket Server running ws://localhost:8765`  
+Then open the UI in your browser.
+Make sure the backend is running before pressing Connect.
 
 ## Configuration
+
+### Serial Port (Windows – STM32 via ST-Link)
+
+1. Open **Device Manager**
+2. Expand **Ports (COM & LPT)**
+3. Look for:
+
+   STMicroelectronics STLink Virtual COM Port (COMx)
+
+4. Use that COM number in the UI.
+
+Example:
+If Device Manager shows:
+
+STMicroelectronics STLink Virtual COM Port (COM3)
+
+Then enter:
+- `3` in the Connect field.
+
+
 
 ## How to use
 The robot control system operates through a **PC-based UI** communicating with an STM32 controller via Serial (COM) interface.
@@ -26,6 +92,18 @@ There are two main control modes available in the system:
 
 ---
 
+
+
+
+
+
+
+
+
+
+
+
+
 ### **Protocal : Address & Function**
 ---
 #### **Register Address Table**
@@ -33,28 +111,28 @@ There are two main control modes available in the system:
 | Address   | Description   | Operation |
 |---------- |----------     |---------- |
 | 0x00      | Heartbear Protocol [NEED_ASK] Read/Write |  
-| 0x01      | Base System Status [OK] | Write      | - 
-| 0x02      | Gripper Status     [OK] | Read/Write | -
-| 0x03      | Gripper Movement Status  [OK]  | Read/Write| -
-| 0x04      | Gripper Movement Actual Status  [OK]  | Read | -
-| 0x05      | Gripper Activate toggle [OK]    | Write | 
-| 0x10      | Theta Moving Status [EED_AS] | Read |
-| 0x11      | Theta Actual Position [OK]| Read |
-| 0x12      | Theta Actual Velocity [OK]| Read |
-| 0x13      | Theta Actual Acceleration [OK]| Read |
-| 0x14      | Jog Mode (Command) [OK]   | Write |
-| 0x15      | Test Mode (Performance/Precision) [OK]| Write|
-| 0x16      | (Test)Performance - Speed  [OK] | Write |
-| 0x17      | (Test)Performance - Accel  [OK] | Write |
-| 0x18      | (Test)Precision - Init pos [OK] | Write |
-| 0x19      | (Test)Precision - Target pos [OK]| Write |
-| 0x20      | (Test)Precision - # Repeat (sign = unit) [OK] | Write  |
+| 0x01      | Base System Status   | Write      | - 
+| 0x02      | Gripper Status       | Read/Write | -
+| 0x03      | Gripper Movement Status     | Read/Write| -
+| 0x04      | Gripper Movement Actual Status     | Read | -
+| 0x05      | Gripper Activate toggle      | Write | 
+| 0x10      | Theta Moving Status [NEED_ASK] | Read |
+| 0x11      | Theta Actual Position  | Read |
+| 0x12      | Theta Actual Velocity  | Read |
+| 0x13      | Theta Actual Acceleration  | Read |
+| 0x14      | Jog Mode (Command)     | Write |
+| 0x15      | Test Mode (Performance/Precision)  | Write|
+| 0x16      | (Test)Performance - Speed    | Write |
+| 0x17      | (Test)Performance - Accel    | Write |
+| 0x18      | (Test)Precision - Init pos   | Write |
+| 0x19      | (Test)Precision - Target pos  | Write |
+| 0x20      | (Test)Precision - # Repeat (sign = unit)  | Write  |
 | 0x21-0x25 | Pick Hole #1-#5 (sign = direction) [NOT_YET] | Write |
 | 0x26-0x30 | Place Hole #1-#5 (sign = direction) [NOT_YET] | Write | 
-| 0x31      | Point to Point (unit)  [OK]  | Write | 
-| 0x32      | Point to Point (value) [OK] | Write |
-| 0x33      | Emergency status [OK]  | Read |
-| 0x34      | Stop the process  [OK] | Write | 
+| 0x31      | Point to Point (unit)    | Write | 
+| 0x32      | Point to Point (value)  | Write |
+| 0x33      | Emergency status   | Read |
+| 0x34      | Stop the process   | Write | 
 ---
 
 ### Data Format
