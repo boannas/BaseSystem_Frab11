@@ -1,13 +1,13 @@
-<!-- # Base System 
+# Base System 
 The Base System with user interfce for FRA263/264 (Robotics Studio III)
-
+<!-- 
 ## Installation
 ### Requirements
 - Python 3.10+ (recommended)
 - STM32 connected via USB
-- Modbus RTU settings must match firmware: 19200 baud, 8 data bits, even parity, 1 stop bit (8E1) -->
+- Modbus RTU settings must match firmware: 19200 baud, 8 data bits, even parity, 1 stop bit (8E1) 
 
-<!-- ### Setup Virtual Environment 
+### Setup Virtual Environment 
 1. Clone the repository
 ```
 git clone xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -49,7 +49,7 @@ you should see like this `WebSocket Server running ws://localhost:8765`
 Then open the UI in your browser.
 Make sure the backend is running before pressing Connect. -->
 
-<!-- ## Configuration
+## Configuration
 
 ### Serial Port (Windows – STM32 via ST-Link)
 
@@ -90,10 +90,9 @@ There are two main control modes available in the system:
         - Point to Point: the user can move the `Theta` by giving value (can select for Degree or saved hole index). [can repeatable go <> back] 
         - Pick and Place: the user need to save the target holes (5 holes), this mode should input the index for pick and place, then press the `Start` button for execute the process.
 
----
 
 
- -->
+
 
 
 
@@ -110,7 +109,7 @@ There are two main control modes available in the system:
 
 | Address   | Description   | Operation |
 |---------- |----------     |---------- |
-| 0x00      | Heartbeat Protocol [NEED_ASK] Read/Write |  
+| 0x00      | Heartbeat Protocol [NEED_ASK] | Read/Write |  
 | 0x01      | Base System Mode   | Write      | - 
 | 0x02      | Gripper Status       | Write | -
 | 0x03      | Gripper Movement Status     | Write| -
@@ -137,7 +136,9 @@ There are two main control modes available in the system:
 
 ### Data Format
 #### 1. Base System Status (0x01)
-Controls the robot’s high-level operating mode and system actions, such as homing, manual operation, or autonomous execution.
+Controls the robot’s high-level operating mode and system actions, such as homing, manual operation, or autonomous execution from UI.
+
+(BS -> R)
 
 | Bit | Data in Binary | Data in Decimal | Description                                     |
 | --- | -------------------- | ------- | ----------------------------------------------- |
@@ -149,7 +150,9 @@ Controls the robot’s high-level operating mode and system actions, such as hom
 
 
 #### 2. Gripper Status (0x02) 
-Controls the gripper actuator (Grip / Release).
+Controls the gripper action (Open/Close) or sequence (Pick/Place) from UI.
+
+(BS -> R)
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -160,7 +163,9 @@ Controls the gripper actuator (Grip / Release).
 
 
 #### 3. Gripper Movement Status (0x03) 
-Commands the gripper linear movement direction.
+Commands the gripper linear movement direction from UI.
+
+(BS -> R)
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -172,11 +177,13 @@ Commands the gripper linear movement direction.
 
 Reports the status of the three limit (reed) switches on the gripper mechanism.
 
+(R -> BS)
 
 > NOTE:  
 reed#1 ON and reed#2 OFF == UP  
 reed#1 OFF and reed#2 ON == DOWN  
 reed#3 ON == CLOSE else UP
+
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -188,8 +195,10 @@ reed#3 ON == CLOSE else UP
 #### 5. Gripper checkbox (0x05)
 
 Gripper checkbox = enable / disable gripper actuation
-- 'ON' -> Robot motion + gripper actions work
 - 'OFF' -> Robot motion works, gripper does nothing
+- 'ON' -> Robot motion + gripper actions work
+
+(BS -> R)
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -197,9 +206,12 @@ Gripper checkbox = enable / disable gripper actuation
 | 0   | 0000 0000 0000 0001 | 1 | gripper `ON`  |
 
 
-#### 6. Theta Moving Status (0x10) 
+
+#### [NOT YET] 6. Theta Moving Status (0x10) 
 
 Monitor the robot's internal state or which actions is currently performing.
+
+(R -> BS)
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -216,24 +228,60 @@ Moniter the robot's actual position, speed, accelation. Must contain only two de
 
 > Example: If the value of the position you want to send is '123.4', multiply by 10 to get '1234', and send this value to the address z-axis Actual position (0x11). This will appear in Base-system as '123.4'  
 
+(R -> BS)
 
 
-<!-- #### 8. Pick order(0x21), Place order(0x22) <span style="color:#d73a49;font-weight:bold">[NOT YET]</span>
-The order of pick and place sent from the Base system to the robot will correspond to the pick and place order displayed in GUI. 
+#### 8. Jog Mode (command) (0x14)
+This address will contain the discrete degree robot should move and the sign is for counter clockwise (CCW -> +) and clockwise (CW -> -) (int16)
 
 
+#### 9. (TEST) Performance / Precision mode (0x15)
 
-#### 9. Emergency status (0x40) <span style="color:#d73a49;font-weight:bold">[NOT YET]</span>
+| Bit | Data in Binary | Data in Decimal | Meaning |
+| ----- | ----- | ----- | ----- |
+| 0   | 0000 0000 0000 0000 | 0 | Precision mode  |
+| 0   | 0000 0000 0000 0001 | 1 | Performance mode      |
+
+#### 10. (TEST) Performance - Speed (0x16)
+
+#### 11. (TEST) Performance - Accel (0x17)
+
+#### 12. (TEST) Precision - Initital position (0x18)
+
+#### 13. (TEST) Precision - Target position (0x19)
+
+#### 14. (TEST) Precision - # Repeat (sign = unit) (0x20)
+
+#### 15. Pick Hole #1-#5 (sign = direction) (0x21 - 0x25)
+
+#### 16. Place Hole #1-#5 (sign = direction) (0x26 - 0x30)
+
+#### 17. Point to Point (unit) (0x31)
+| Bit | Data in Binary | Data in Decimal | Meaning |
+| ----- | ----- | ----- | ----- |
+| 0   | 0000 0000 0000 0000 | 0 | Degree |
+| 0   | 0000 0000 0000 0001 | 1 | Index  |
+
+
+#### 18. Point to Point (value) (0x32)
+
+#### 19. Emergency Status (0x33)
+
 This receive the `Emergency button state` from the robot
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
 | 0   | 0000 0000 0000 0000 | 0 | Emergency `Did not pressed`|
 | 0   | 0000 0000 0000 0001 | 1 | Emergency `Pressed`  |
 
-#### 10. Stop the process (0x41) <span style="color:#d73a49;font-weight:bold">[NOT YET]</span>
+#### 20. Stop the process (0x34)
+
 Stop the robot's process.
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
 | 0   | 0000 0000 0000 0000 | 0 | Robot's run normally  |
-| 0   | 0000 0000 0000 0001 | 1 | Stop the process      | -->
+| 0   | 0000 0000 0000 0001 | 1 | Stop the process      |
+
+
+
+
