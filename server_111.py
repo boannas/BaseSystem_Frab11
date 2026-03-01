@@ -48,7 +48,7 @@ async def stats_loop(websocket):
                             last_seen_ya_time = time.perf_counter()
                             sent_hi, _ = await asyncio.to_thread(protocol.heartbeat_from_routine)
                         
-                        print(protocol.register.registers)
+                        # print(protocol.register.registers)
                         # print(protocol.register.registers[0x30:0x36])
                         robot_state["position"] = protocol.theta_actual_pos
                         robot_state["speed"] = protocol.theta_actual_speed
@@ -182,45 +182,38 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
 
                 # 0x03
                 elif action == "gripper_up":
-                    print("gripper_up")
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_gripper_movement, "Up")
                     continue
 
                 elif action == "gripper_down":
-                    print("gripper_down")
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_gripper_movement, "Down")
                     continue
 
                 # 0x02
                 elif action == "gripper_open":
-                    print("gripper_open")
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_gripper_command, "Open")
                     continue
 
                 elif action == "gripper_close":
-                    print("gripper_close")
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_gripper_command, "Close")
                     continue
 
                 elif action == "gripper_pick":
-                    print("gripper_pick")
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_gripper_command, "Pick")
                     continue
 
                 elif action == "gripper_place":
-                    print("gripper_place")
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_gripper_command, "Place")
                     continue
                 
                 # 0x14
                 elif action == 'jog':
-                    print('Jog', data.get('value'), data.get('direction'))
                     value = data.get('value')
                     direction = '+' if data.get('direction') == 'CCW' else '-'
                     jog_value = int(str(direction) + str(value))
@@ -236,7 +229,6 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     continue
 
                 if action == "pick_place":
-                    print('pp', data.get('sequence'), data.get('directions'), data.get('use_gripper'))
                     order_sequence = data.get('sequence')
                     direction_sequence = data.get('directions')
                     gripper_enable = (data.get('use_gripper'))   
@@ -252,7 +244,6 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                         continue
                 
                 elif action == 'point_to_point':    
-                    print("point", data.get('value'), data.get('unit'))
                     p2p_unit = data.get('unit')
                     p2p_value = data.get('value')
                     async with modbus_lock:
@@ -268,7 +259,6 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     continue
 
                 elif action == "performance": 
-                    print('perform', data.get('speed'), data.get('accel') )
                     speed_test = data.get('speed')
                     accel_test = data.get('accel')
 
@@ -279,7 +269,6 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     continue
 
                 elif action == "precision":
-                    print('preci', data.get('init_pos'), data.get('tar_pos'), data.get('repeat'), data.get('unit'))
                     init_pos_test = data.get('init_pos')
                     target_pos_test = data.get('tar_pos')
                     repeat_test = data.get('repeat')
@@ -296,7 +285,6 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
 
             # # ---------------- STOP ----------------
             elif req_mode == "Stop" and action == 'stop':
-                print('ssssttttttooooopppp')
                 async with modbus_lock:
                     await asyncio.to_thread(protocol.write_stop_process, 'Stop')    # 0x34
                 continue

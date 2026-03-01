@@ -1,13 +1,13 @@
-# Base System 
+<!-- # Base System 
 The Base System with user interfce for FRA263/264 (Robotics Studio III)
 
 ## Installation
 ### Requirements
 - Python 3.10+ (recommended)
 - STM32 connected via USB
-- Modbus RTU settings must match firmware: 19200 baud, 8 data bits, even parity, 1 stop bit (8E1)
+- Modbus RTU settings must match firmware: 19200 baud, 8 data bits, even parity, 1 stop bit (8E1) -->
 
-### Setup Virtual Environment 
+<!-- ### Setup Virtual Environment 
 1. Clone the repository
 ```
 git clone xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -47,9 +47,9 @@ python server.py
 
 you should see like this `WebSocket Server running ws://localhost:8765`  
 Then open the UI in your browser.
-Make sure the backend is running before pressing Connect.
+Make sure the backend is running before pressing Connect. -->
 
-## Configuration
+<!-- ## Configuration
 
 ### Serial Port (Windows – STM32 via ST-Link)
 
@@ -93,7 +93,7 @@ There are two main control modes available in the system:
 ---
 
 
-
+ -->
 
 
 
@@ -110,12 +110,12 @@ There are two main control modes available in the system:
 
 | Address   | Description   | Operation |
 |---------- |----------     |---------- |
-| 0x00      | Heartbear Protocol [NEED_ASK] Read/Write |  
-| 0x01      | Base System Status   | Write      | - 
-| 0x02      | Gripper Status       | Read/Write | -
-| 0x03      | Gripper Movement Status     | Read/Write| -
+| 0x00      | Heartbeat Protocol [NEED_ASK] Read/Write |  
+| 0x01      | Base System Mode   | Write      | - 
+| 0x02      | Gripper Status       | Write | -
+| 0x03      | Gripper Movement Status     | Write| -
 | 0x04      | Gripper Movement Actual Status     | Read | -
-| 0x05      | Gripper Activate toggle      | Write | 
+| 0x05      | Gripper Enable Checkbox      | Write | 
 | 0x10      | Theta Moving Status [NEED_ASK] | Read |
 | 0x11      | Theta Actual Position  | Read |
 | 0x12      | Theta Actual Velocity  | Read |
@@ -136,7 +136,7 @@ There are two main control modes available in the system:
 ---
 
 ### Data Format
-#### 1. Base System Status (0x01) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
+#### 1. Base System Status (0x01)
 Controls the robot’s high-level operating mode and system actions, such as homing, manual operation, or autonomous execution.
 
 | Bit | Data in Binary | Data in Decimal | Description                                     |
@@ -148,7 +148,7 @@ Controls the robot’s high-level operating mode and system actions, such as hom
 | 3   | 0000 0000 0001 0000  | 16       | **Test Mode** – Entered Test mode|
 
 
-#### 2. Gripper Status (0x02) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
+#### 2. Gripper Status (0x02) 
 Controls the gripper actuator (Grip / Release).
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
@@ -159,7 +159,7 @@ Controls the gripper actuator (Grip / Release).
 | 0   | 0000 0000 0000 0011 | 3 = Place | Gripper `Place` |
 
 
-#### 3. Gripper Movement Status (0x03) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
+#### 3. Gripper Movement Status (0x03) 
 Commands the gripper linear movement direction.
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
@@ -168,7 +168,7 @@ Commands the gripper linear movement direction.
 | 0   | 0000 0000 0000 0001   | 1 = Down  | Forward movement  |
 
 
-#### 4. Gripper Movement Actual Status (0x04) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
+#### 4. Gripper Movement Actual Status (0x04) 
 
 Reports the status of the three limit (reed) switches on the gripper mechanism.
 
@@ -185,7 +185,7 @@ reed#3 ON == CLOSE else UP
 | 2   | 0000 0000 0000 0100 | 0 / 4 | Lead Switch 3 (0 = Off, 1 = On) |
 
 
-#### 5. Gripper checkbox (0x05) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
+#### 5. Gripper checkbox (0x05)
 
 Gripper checkbox = enable / disable gripper actuation
 - 'ON' -> Robot motion + gripper actions work
@@ -197,7 +197,7 @@ Gripper checkbox = enable / disable gripper actuation
 | 0   | 0000 0000 0000 0001 | 1 | gripper `ON`  |
 
 
-#### 6. Theta Moving Status (0x10) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
+#### 6. Theta Moving Status (0x10) 
 
 Monitor the robot's internal state or which actions is currently performing.
 
@@ -211,7 +211,7 @@ Monitor the robot's internal state or which actions is currently performing.
 
 
 
-#### 7. Position / Speed / Accelation (0x11 to 0x13) <span style="color:#2ea043;font-weight:bold">[DONE]</span>
+#### 7. Position / Speed / Accelation (0x11 to 0x13) 
 Moniter the robot's actual position, speed, accelation. Must contain only two decimal place, before sending the values to the `Base System`, multiply the actual value to 10 (Base_system_value = Actual_value * 10)
 
 > Example: If the value of the position you want to send is '123.4', multiply by 10 to get '1234', and send this value to the address z-axis Actual position (0x11). This will appear in Base-system as '123.4'  
