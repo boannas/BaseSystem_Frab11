@@ -101,8 +101,6 @@ There are two main control modes available in the system:
 
 
 
-
-
 ### **Protocal : Address & Function**
 ---
 #### **Register Address Table**
@@ -138,7 +136,7 @@ There are two main control modes available in the system:
 #### 1. Base System Status (0x01)
 Controls the robot’s high-level operating mode and system actions, such as homing, manual operation, or autonomous execution from UI.
 
-(BS -> R)
+(Base System -> Robot)
 
 | Bit | Data in Binary | Data in Decimal | Description                                     |
 | --- | -------------------- | ------- | ----------------------------------------------- |
@@ -152,7 +150,7 @@ Controls the robot’s high-level operating mode and system actions, such as hom
 #### 2. Gripper Status (0x02) 
 Controls the gripper action (Open/Close) or sequence (Pick/Place) from UI.
 
-(BS -> R)
+(Base System -> Robot)
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -165,7 +163,7 @@ Controls the gripper action (Open/Close) or sequence (Pick/Place) from UI.
 #### 3. Gripper Movement Status (0x03) 
 Commands the gripper linear movement direction from UI.
 
-(BS -> R)
+(Base System -> Robot)
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -177,19 +175,20 @@ Commands the gripper linear movement direction from UI.
 
 Reports the status of the three limit (reed) switches on the gripper mechanism.
 
-(R -> BS)
+(Robot -> Base System)
 
-> NOTE:  
-reed#1 ON and reed#2 OFF == UP  
-reed#1 OFF and reed#2 ON == DOWN  
-reed#3 ON == CLOSE else UP
+> [!IMPORTANT]  
+> **Reed Switch Configuration:**
+> 1. **UP:** `reed#1` (ON), `reed#2` (OFF)
+> 2. **DOWN:** `reed#1` (OFF), `reed#2` (ON)
+> 3. **GRIP:** `reed#3` (ON) | **RELEASE:** `reed#3` (OFF)
 
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0001 | 0 / 1 | Lead Switch 1 (0 = Off, 1 = On) |
-| 1   | 0000 0000 0000 0010 | 0 / 2 | Lead Switch 2 (0 = Off, 1 = On) |
-| 2   | 0000 0000 0000 0100 | 0 / 4 | Lead Switch 3 (0 = Off, 1 = On) |
+| 0   | 0000 0000 0000 0001 | 0 / 1 | Reed Switch 1 (0 = Off, 1 = On) |
+| 1   | 0000 0000 0000 0010 | 0 / 2 | Reed Switch 2 (0 = Off, 1 = On) |
+| 2   | 0000 0000 0000 0100 | 0 / 4 | Reed Switch 3 (0 = Off, 1 = On) |
 
 
 #### 5. Gripper checkbox (0x05)
@@ -198,7 +197,7 @@ Gripper checkbox = enable / disable gripper actuation
 - 'OFF' -> Robot motion works, gripper does nothing
 - 'ON' -> Robot motion + gripper actions work
 
-(BS -> R)
+(Base System -> Robot)
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -211,7 +210,7 @@ Gripper checkbox = enable / disable gripper actuation
 
 Monitor the robot's internal state or which actions is currently performing.
 
-(R -> BS)
+(Robot -> Base System)
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
@@ -228,7 +227,7 @@ Moniter the robot's actual position, speed, accelation. Must contain only two de
 
 > Example: If the value of the position you want to send is '123.4', multiply by 10 to get '1234', and send this value to the address z-axis Actual position (0x11). This will appear in Base-system as '123.4'  
 
-(R -> BS)
+(Robot -> Base System)
 
 
 #### 8. Jog Mode (command) (0x14)
