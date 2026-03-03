@@ -169,8 +169,8 @@ Commands the gripper linear movement direction from UI.
 
 | Bit | Data in Binary | Data in Decimal | Meaning |
 | ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000  | 0 = Up | Backward movement |
-| 0   | 0000 0000 0000 0001   | 1 = Down  | Forward movement  |
+| 0   | 0000 0000 0000 0000  | 0 = Up | Up movement |
+| 0   | 0000 0000 0000 0001   | 1 = Down  | Down movement  |
 
 
 #### 4. Gripper Movement Actual Status (0x04) 
