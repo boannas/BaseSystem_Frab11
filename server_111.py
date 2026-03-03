@@ -76,10 +76,12 @@ async def stats_loop(websocket):
                         else:
                             robot_state["gripper_jaw"] = "Idle"
             
+            # Check heartbeat are Normal
             dt = time.perf_counter() - last_seen_ya_time
             alive = dt <= HB_DEAD_TIMEOUT
             connected = bool(protocol.client) and protocol.is_connected() and alive
 
+            # print()
             payload = {
                 "type": "STATS",
                 "pos": robot_state["position"],
@@ -88,7 +90,8 @@ async def stats_loop(websocket):
                 "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
                 "mode": robot_state["mode"],
                 "emergency": robot_state["emergency"],
-                "connected": connected,
+                # "connected": connected,
+                "heartbeat": connected 
             }
 
             try:
@@ -176,6 +179,7 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
             # ---------------- MANUAL / JOG ----------------
             elif req_mode == "Manual":
                 if action == "set_manual":  # 0x01
+                    print(55555)
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_base_system_status, "Jog")
                     continue
