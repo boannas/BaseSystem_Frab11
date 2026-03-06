@@ -348,12 +348,11 @@ class Protocol(Binary):
         # self.client.write_register(address=0x20, value=self.test_repeat_w_unit, slave=self.slave_address)
         self._write_register_debug(0x20, self.test_repeat_w_unit, "TestRepeat")
 
-    # === Write Pick Hole  #1-#5 (AUTO) (0x21 - 0x25) ===
-    def write_pick_hole(self, pick_order, direction):
-        pass
-    # === Write Place Hole #1-#5 (AUTO) (0x26 - 0x30) ===
-    def write_place_hole(self, place_order, direction):
-        pass
+    # === Write Pick & Place Hole  #1-#5 (AUTO) (0x21 - 0x30) ===
+    def write_pick_place_hole(self, address, value):
+        signed_value = self.binary_twos_complement(value)
+        self._write_register_debug(address, signed_value, f"Pick Place")
+           
 
     # === Write Point to Point (unit) (0x31) ===
     def write_p2p_unit(self, unit=None):

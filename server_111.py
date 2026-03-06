@@ -237,6 +237,23 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     direction_sequence = data.get('directions')
                     gripper_enable = (data.get('use_gripper'))   
 
+                    # encode signed sequence
+                    encode = [order_sequence[0]] + [
+                        -pos if d == "CW" else pos
+                        for pos, d in zip(order_sequence[1:], direction_sequence)
+                    ]
+                    print("encode:", encode)
+
+                    async with modbus_lock:
+                        base_addr = 21
+                        for i in range(10):
+                            value = encode[i] if i < len(encode) else 0
+                            await asyncio.to_thread(
+                                protocol.write_pick_place_hole,
+                                base_addr + i,
+                                value
+                            )
+
                     if gripper_enable:  # 0x05
                         async with modbus_lock:
                             await asyncio.to_thread(protocol.write_gripper_checkbox, 'Enable')
@@ -246,7 +263,8 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                         async with modbus_lock:
                             await asyncio.to_thread(protocol.write_gripper_checkbox, 'Disable')
                         continue
-                
+                    
+                    
                 elif action == 'point_to_point':    
                     p2p_unit = data.get('unit')
                     p2p_value = data.get('value')
