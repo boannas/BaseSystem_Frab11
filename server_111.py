@@ -47,16 +47,14 @@ async def stats_loop(websocket):
                         if hb_val == HB_YA:
                             last_seen_ya_time = time.perf_counter()
                             sent_hi, _ = await asyncio.to_thread(protocol.heartbeat_from_routine)
-                        
-                        # print(protocol.register.registers)
-                        # print(protocol.register.registers[0x30:0x36])
+
                         robot_state["position"] = protocol.theta_actual_pos
                         robot_state["speed"] = protocol.theta_actual_speed
                         robot_state["accel"] = protocol.theta_actual_accel
                         robot_state["emergency"] = protocol.emergency_stop_status
                         robot_state["mode"] = protocol.moving_status
 
-                        # Check state gripper [0x04]
+                        # Gripper reeds from READ 0x26
                         reed1 = protocol.gripper_actual_reed1
                         reed2 = protocol.gripper_actual_reed2
                         reed3 = protocol.gripper_actual_reed3
@@ -90,7 +88,6 @@ async def stats_loop(websocket):
                 "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
                 "mode": robot_state["mode"],
                 "emergency": robot_state["emergency"],
-                # "connected": connected,
                 "heartbeat": connected 
             }
 
@@ -166,36 +163,34 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
 
             # ---------------- HOME ----------------
             if req_mode == "Home":
-                if action == "go_home": # 0x01
+                if action == "go_home":  # WRITE 0x01
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_base_system_status, "go_home")
                     continue
 
-                elif action == "set_home": #0x01
+                elif action == "set_home":  # WRITE 0x01
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_base_system_status, "set_home")
                     continue
 
             # ---------------- MANUAL / JOG ----------------
             elif req_mode == "Manual":
-                if action == "set_manual":  # 0x01
-                    print(55555)
+                if action == "set_manual":  # WRITE 0x01 — Jog operating mode
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_base_system_status, "Jog")
                     continue
 
-                # 0x03
+                # WRITE 0x02 — gripper open | close | up | down
                 elif action == "gripper_up":
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_gripper_movement, "Up")
+                        await asyncio.to_thread(protocol.write_gripper_command, "Up")
                     continue
 
                 elif action == "gripper_down":
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_gripper_movement, "Down")
+                        await asyncio.to_thread(protocol.write_gripper_command, "Down")
                     continue
 
-                # 0x02
                 elif action == "gripper_open":
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_gripper_command, "Open")
@@ -206,17 +201,18 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                         await asyncio.to_thread(protocol.write_gripper_command, "Close")
                     continue
 
+                # WRITE 0x03 — gripper pick | place
                 elif action == "gripper_pick":
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_gripper_command, "Pick")
+                        await asyncio.to_thread(protocol.write_gripper_movement, "Pick")
                     continue
 
                 elif action == "gripper_place":
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_gripper_command, "Place")
+                        await asyncio.to_thread(protocol.write_gripper_movement, "Place")
                     continue
-                
-                # 0x14
+
+                # WRITE 0x05 — jog (degree)
                 elif action == 'jog':
                     value = data.get('value')
                     direction = '+' if data.get('direction') == 'CCW' else '-'
@@ -229,32 +225,42 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
             elif req_mode == "Auto":
                 if action == 'set_auto':
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_base_system_status, "Auto")
+                        await asyncio.to_thread(protocol.write_base_system_status, "Auto")  # WRITE 0x01
                     continue
 
                 if action == "pick_place":
                     order_sequence = data.get('sequence')
                     direction_sequence = data.get('directions')
                     gripper_enable = (data.get('use_gripper'))   
+                    n_pair = len(order_sequence) // 2
 
                     # encode signed sequence
                     encode = [order_sequence[0]] + [
                         -pos if d == "CW" else pos
                         for pos, d in zip(order_sequence[1:], direction_sequence)
                     ]
-                    print("encode:", encode)
+                    # print("encode:", encode)
 
                     async with modbus_lock:
-                        base_addr = 21
-                        for i in range(10):
+                        # WRITE 0x12–0x21 — pick/place per hole + direction
+                        addresses = [0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x20,0x21]
+
+                        for i, addr in enumerate(addresses):
                             value = encode[i] if i < len(encode) else 0
+
                             await asyncio.to_thread(
                                 protocol.write_pick_place_hole,
-                                base_addr + i,
+                                addr,
                                 value
                             )
 
-                    if gripper_enable:  # 0x05
+                        # WRITE 0x22 — n pair pick-place
+                        await asyncio.to_thread(
+                            protocol.write_n_pair, n_pair                           
+                        )
+                    
+                    # WRITE 0x04 — gripper enable (AUTO)
+                    if gripper_enable:
                         async with modbus_lock:
                             await asyncio.to_thread(protocol.write_gripper_checkbox, 'Enable')
                         continue
@@ -269,15 +275,15 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     p2p_unit = data.get('unit')
                     p2p_value = data.get('value')
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_p2p_unit, p2p_unit)      # 0x31
-                        await asyncio.to_thread(protocol.write_p2p_value, p2p_value)    # 0x32
+                        await asyncio.to_thread(protocol.write_p2p_unit, p2p_unit)      # WRITE 0x23 — P2P unit
+                        await asyncio.to_thread(protocol.write_p2p_value, p2p_value)    # WRITE 0x24 — P2P position
                     continue
 
             # ---------------- TEST ----------------
             elif req_mode == "Test":
                 if action == "set_test":
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_base_system_status, "Test")
+                        await asyncio.to_thread(protocol.write_base_system_status, "Test")  # WRITE 0x01 — Test mode
                     continue
 
                 elif action == "performance": 
@@ -285,9 +291,9 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     accel_test = data.get('accel')
 
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_test_mode, 'Performance')    # 0x15
-                        await asyncio.to_thread(protocol.write_test_speed, speed_test)      # 0x16
-                        await asyncio.to_thread(protocol.write_test_accel, accel_test)      # 0x17
+                        await asyncio.to_thread(protocol.write_test_mode, 'Performance')    # WRITE 0x06
+                        await asyncio.to_thread(protocol.write_test_speed, speed_test)      # WRITE 0x07
+                        await asyncio.to_thread(protocol.write_test_accel, accel_test)      # WRITE 0x08
                     continue
 
                 elif action == "precision":
@@ -299,16 +305,16 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     unit_sign = '+' if unit_test == 'degree' else '-'
                     repeat_w_unit = int(str(unit_sign) + str(repeat_test))
                     async with modbus_lock:
-                        await asyncio.to_thread(protocol.write_test_mode, 'Precision')      # 0x15
-                        await asyncio.to_thread(protocol.write_test_init_pos, init_pos_test)        # 0x18
-                        await asyncio.to_thread(protocol.write_test_target_pos, target_pos_test)    # 0x19
-                        await asyncio.to_thread(protocol.write_test_repeat, repeat_w_unit)          # 0x20
+                        await asyncio.to_thread(protocol.write_test_mode, 'Precision')      # WRITE 0x06
+                        await asyncio.to_thread(protocol.write_test_init_pos, init_pos_test)        # WRITE 0x09
+                        await asyncio.to_thread(protocol.write_test_target_pos, target_pos_test)    # WRITE 0x10
+                        await asyncio.to_thread(protocol.write_test_repeat, repeat_w_unit)          # WRITE 0x11
                     continue
 
-            # # ---------------- STOP ----------------
+            # ---------------- STOP ----------------
             elif req_mode == "Stop" and action == 'stop':
                 async with modbus_lock:
-                    await asyncio.to_thread(protocol.write_stop_process, 'Stop')    # 0x34
+                    await asyncio.to_thread(protocol.write_stop_process, 'Stop')    # WRITE 0x25 — soft stop
                 continue
 
             else : 

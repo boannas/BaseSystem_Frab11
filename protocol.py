@@ -2,7 +2,8 @@ import platform
 from pymodbus.client import ModbusSerialClient as ModbusClient
 
 
-MAX_ADDRESS = 0x34
+# Last holding register in the READ map (0x26–0x31 status); routine reads 0x00 through 0x31.
+MAX_ADDRESS = 0x31
 
 HB_HI = 18537       # HI 
 HB_YA = 22881       # YA
@@ -69,46 +70,40 @@ class Protocol(Binary):
         # Routine
         self.routine_normal = True
 
-        # Heartbeat (0x00)
+        # Heartbeat — READ 0x00 (reply HI via WRITE 0x00)
         self.hb_val = None
 
-        # Base system status (0x01)
+        # Set operating mode — WRITE 0x01
         self.base_system_status_register = 0b0000
-        
-        # Gripper status (0x02) -- 0: Release, 1: Grip
+
+        # Local/UI gripper state 
         self.gripper_status = "0"
-        
-        # Gripper Movement status (0x03) 0: Backward, 1: Forward
         self.gripper_moving_status = "0"
 
-        # Gripper Movement Actual Status (0x04) 
-        self.gripper_actual_reed1 = "0"  
+        # Lead/reed sensors — READ 0x26
+        self.gripper_actual_reed1 = "0"
         self.gripper_actual_reed2 = "0"
         self.gripper_actual_reed3 = "0"
 
-        # Gripper Checkbox (0x05) -- 0: Disable, 1: Enable
+        # Gripper enable checkbox (AUTO) — WRITE 0x04
         self.gripper_checkbox = "0"
 
-        # Thetha Moving Status (0x10)
+        # Current robot task — READ 0x27
         self.moving_status = "Idle"
         self.moving_status_previous = "Idle"
 
-        # Theta Moving Status (0x11 - 0x13) 
+        # Position, velocity, acceleration — READ 0x28, 0x29, 0x30
         self.theta_actual_pos = 0.0
         self.theta_actual_speed = 0.0
         self.theta_actual_accel = 0.0
 
-        # Emergency Stop Status (0x40) -- 0: Normal, 1: Emergency Stop
-        self.emergency_stop_status = "0" 
+        # Robot emergency state — READ 0x31
+        self.emergency_stop_status = "0"
 
-        # Stop the process (0x41) -- 0: Normal, 1: Stop
+        # Soft stop — WRITE 0x25
         self.stop_process = "0"
 
     def _write_register_debug(self, address: int, value: int, label: str = "") -> bool:
-        """
-        Generic FC06 write with full debug logging.
-        """
-
         if not self.client:
             print(f"[ERROR] No Modbus client. Cannot write {label}")
             return False
@@ -188,24 +183,21 @@ class Protocol(Binary):
         # Heartbeat        
         self.hb_val = rr.registers[0]
         
-        # Routine for reading registers
-        self.read_gripper_actual_status()   # gripper status (0x02 - 0x04)
-        self.read_theta_moving_status()     # theta moving status (0x10)
-        self.read_theta_actual_status()     # theta actual status (0x11 - 0x13)
-        self.read_emergency_stop_status()   # emergency stop status (0x33)
+        # READ: 0x26 reeds, 0x27 task, 0x28–0x30 motion, 0x31 emergency
+        self.read_gripper_actual_status()   # 0x26 lead/reed sensors
+        self.read_theta_moving_status()     # 0x27 current robot task
+        self.read_theta_actual_status()     # 0x28–0x30 position, velocity, acceleration
+        self.read_emergency_stop_status()   # 0x31 robot emergency state
         self.routine_normal = True
         return True
 
+#### STATUS + Connection
     # === Heartbeat Functions (0x00) ===
     def write_heartbeat_hi(self) -> bool:
         wr = self.client.write_register(address=0x00, value=HB_HI, slave=self.slave_address)
         if wr is None or (hasattr(wr, "isError") and wr.isError()):
             return False
         return True
-
-    # def write_heartbeat_hi(self) -> bool:
-    #     return self._write_register_debug(0x00, HB_HI, "Heartbeat HI")
-    
     def heartbeat_from_routine(self):
         hb = getattr(self, "hb_val", None)
         if hb is None:
@@ -217,7 +209,7 @@ class Protocol(Binary):
 
         return False, hb
     
-    # === Write Basesystem Mode (0x01) ===
+    # === Set operating mode (0x01) ===
     def write_base_system_status(self, command):
         if command == 'go_home':
             self.base_system_status_register = 0b0001   
@@ -229,58 +221,130 @@ class Protocol(Binary):
             self.base_system_status_register = 0b1000
         elif command == 'Test':
             self.base_system_status_register = 0b10000
-
-        # self.client.write_register(address=0x01, value=self.base_system_status_register, slave=self.slave_address)
         self._write_register_debug(0x01, self.base_system_status_register, f"BaseSystem {command}")
 
-    # === Write Gripper action/sequence (0x02) ===
+
+#### [Manual] Gripper + Command
+    # === Gripper open | close | up | down command (0x02) ===
     def write_gripper_command(self, command):
-        if command == 'Open':
+        if command == 'Up':
             self.gripper_command_register = 0b0000   
-        elif command == 'Close':
+        elif command == 'Down':
             self.gripper_command_register = 0b0001
-        elif command == 'Pick':
+        elif command == 'Open':
             self.gripper_command_register = 0b0010
-        elif command == 'Place':
-            self.gripper_command_register = 0b0011
-        # self.client.write_register(address=0x02, value=self.gripper_command_register, slave=self.slave_address)
+        elif command == 'Close':
+            self.gripper_command_register = 0b0100
         self._write_register_debug(0x02, self.gripper_command_register, f"Gripper {command}")
 
-    # === Write Gripper Up/Down (0x03) ===
+    # === Gripper pick | place command (0x03) ===
     def write_gripper_movement(self, command):
-        if command == 'Up':
-            self.gripper_movement_register = 0b0000   
-        elif command == 'Down':
-            self.gripper_movement_register = 0b0001
-        # self.client.write_register(address=0x03, value=self.gripper_movement_register, slave=self.slave_address)
+        if command == 'Pick':
+            self.gripper_movement_register = 0b0001   
+        elif command == 'Place':
+            self.gripper_movement_register = 0b0010
         self._write_register_debug(0x03, self.gripper_movement_register, f"GripperMove {command}")
     
-    # === Read REED switch (0x04) ===
-    def read_gripper_actual_status(self):
-        # gripper_state_binary = self.binary_to_decimal(self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x02])))
-        # gripper_movement_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x03]))[::-1]
-        
-        # Reed switch status
-        gripper_actual_status_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x04]))[::-1]
-        self.gripper_actual_reed1 = (gripper_actual_status_binary[0] == '1') # Reed Switch 1 Status [0x04]
-        self.gripper_actual_reed2 = (gripper_actual_status_binary[1] == '1') # Reed Switch 2 Status [0x04]
-        self.gripper_actual_reed3 = (gripper_actual_status_binary[2] == '1') # Reed Switch 3 Status [0x04]
-
-    # === Write Gripper Checkbox (AUTO mode) (0x05) ===
+    # === Gripper Enable Checkbox (AUTO mode) (0x04) ===
     def write_gripper_checkbox(self, command):
         if command == 'Disable':
-            self.gripper_checkbox_register = 0b0000   
+            self.gripper_checkbox_register = 0b0000
         elif command == 'Enable':
             self.gripper_checkbox_register = 0b0001
-        # self.client.write_register(address=0x05, value=self.gripper_checkbox_register, slave=self.slave_address)
-        self._write_register_debug(0x05, self.gripper_checkbox_register, f"GripperCheckbox {command}")
+        self._write_register_debug(0x04, self.gripper_checkbox_register, f"GripperCheckbox {command}")
     
-    # === Read Current robot states (0x10) ===
+    # === Position incrementing command (Jog: degree) (0x05) ===
+    def write_jog(self, value=None):
+        self.jog_degree = self.binary_twos_complement(value)
+        self._write_register_debug(0x05, self.jog_degree, "JOG")
+
+
+#### [Test] Performance + Precision
+    # === Set test mode (Performance/Precision) (0x06) ===
+    def write_test_mode(self, mode=None):
+        if mode == "Performance":
+            self.test_mode = 1
+        elif mode == "Precision" :
+            self.test_mode = 0 
+        self._write_register_debug(0x06, self.test_mode, f"TestMode {mode}")
+
+    # === Set desire velocity for performance test (0x07) ===
+    def write_test_speed(self, value=None):
+        self.test_speed = self.binary_twos_complement(value)
+        self._write_register_debug(0x07, self.test_speed, "TestSpeed")
+
+    # === Set desire acceleration for performance test (0x08) ===
+    def write_test_accel(self, value=None):
+        self.test_accel = self.binary_twos_complement(value)
+        self._write_register_debug(0x08, self.test_accel, "TestAccel")
+
+    # === Set initial position for precision test (0x09) ===
+    def write_test_init_pos(self, init_pos=None):
+        self.test_init_pos = self.binary_twos_complement(init_pos)
+        self._write_register_debug(0x09, self.test_init_pos, "TestInitPos")
+
+    # === Set final position for precision test (0x10) ===
+    def write_test_target_pos(self, target_pos=None):
+        self.test_target_pos = self.binary_twos_complement(target_pos)
+        self._write_register_debug(0x10, self.test_target_pos, "TestTargetPos")
+
+    # === Set the number of repetition in precision test (sign = unit) (0x11) ===
+    def write_test_repeat(self, repeat=None):
+        self.test_repeat_w_unit = self.binary_twos_complement(repeat)
+        self._write_register_debug(0x11, self.test_repeat_w_unit, "TestRepeat")
+
+
+#### [Auto] Pick-Place + P2P
+    # Desire pick and place for hole 1-5 with direction 
+    # (+1 => go to index 1 in counter 
+    # clockwise direction, -5 => go to index 5 in clockwise direction) 
+    # (0x12-0x21)
+    def write_pick_place_hole(self, address, value):
+        signed_value = self.binary_twos_complement(value)
+        self._write_register_debug(address, signed_value, f"Pick Place")
+           
+    def write_n_pair(self, value):
+        self._write_register_debug(0x22, value, f"N_pare {value}")
+
+    # === Choose unit for point to point action (0x23) ===
+    def write_p2p_unit(self, unit=None):
+        if unit == 'degree':
+            self.p2p_unit = 0b0000 
+        elif unit == 'index':
+            self.p2p_unit = 0b0001
+        self._write_register_debug(0x23, self.p2p_unit, f"P2P Unit {unit}")
+
+    # === Set the desire position based on the unit with direction (0x24) ===
+    def write_p2p_value(self, value=None):
+        self.p2p_value = self.binary_twos_complement(value)
+        self._write_register_debug(0x24, self.p2p_value, "P2P Value")
+
+
+    # === Soft stop command (0x25) ===
+    def write_stop_process(self, command):
+        if command == 'Normal':
+            self.stop_process_register = 0b0000   
+        elif command == 'Stop':
+            self.stop_process_register = 0b0001
+        self._write_register_debug(0x25, self.stop_process_register, f"StopProcess {command}")
+
+
+
+#### READ STATUS
+    # === Leed sensors status (0x26) ===
+    def read_gripper_actual_status(self):
+        # Reed switch status
+        gripper_actual_status_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x26]))[::-1]
+        self.gripper_actual_reed1 = (gripper_actual_status_binary[0] == '1')  # READ 0x26
+        self.gripper_actual_reed2 = (gripper_actual_status_binary[1] == '1')  # READ 0x26
+        self.gripper_actual_reed3 = (gripper_actual_status_binary[2] == '1')  # READ 0x26
+
+
+    # === Current robot task  (0x27) ===
     def read_theta_moving_status(self):
         self.moving_status_previous = self.moving_status
-        moving_status_binary = self.binary_crop(6, self.decimal_to_binary(self.register.registers[0x10]))[::-1]
+        moving_status_binary = self.binary_crop(6, self.decimal_to_binary(self.register.registers[0x27]))[::-1]
         
-        # moving_status_binary = ['0', '1', '0', '0']
         if moving_status_binary[0] == '1':
             self.moving_status = "Homing"
         elif moving_status_binary[1] == '1':
@@ -292,93 +356,15 @@ class Protocol(Binary):
         else:
             self.moving_status = "Idle"
 
-    # === Read Current pos,speed,acc (0x11 - 0x13) ===
+    # === Current robot position w.r.t current home pos,velo,accel (0x28 - 0x30) ===
     def read_theta_actual_status(self):
-        # data must convert to 1 decimal point 
-        # self.register.registers[0x11] = 64302 (-1234)
-        # self.register.registers[0x12] = 1234 (1234)
-        # self.register.registers[0x13] = 61215 (-4321)
+        self.theta_actual_pos = self.binary_reverse_twos_complement(self.register.registers[0x28]) / 10.0
+        self.theta_actual_speed = self.binary_reverse_twos_complement(self.register.registers[0x29]) / 10.0
+        self.theta_actual_accel = self.binary_reverse_twos_complement(self.register.registers[0x30]) / 10.0
 
-        self.theta_actual_pos = self.binary_reverse_twos_complement(self.register.registers[0x11]) / 10.0
-        self.theta_actual_speed = self.binary_reverse_twos_complement(self.register.registers[0x12]) / 10.0
-        self.theta_actual_accel = self.binary_reverse_twos_complement(self.register.registers[0x13]) / 10.0
 
-    # === Write Command (JOG mode) (0x14) ===
-    def write_jog(self, value=None):
-        self.jog_degree = self.binary_twos_complement(value)
-        # self.client.write_register(address=0x14, value=self.jog_degree, slave=self.slave_address)
-        self._write_register_debug(0x14, self.jog_degree, "JOG")
-
-    # === Write Performance/Precision (TEST mode) (0x15) ===
-    def write_test_mode(self, mode=None):
-        if mode == "Performance":
-            self.test_mode = 1
-        elif mode == "Precision" :
-            self.test_mode = 0 
-        # self.client.write_register(address=0x15, value=self.test_mode, slave=self.slave_address)
-        self._write_register_debug(0x15, self.test_mode, f"TestMode {mode}")
-
-    # === Write Performance - speed (TEST mode) (0x16) ===
-    def write_test_speed(self, value=None):
-        self.test_speed = self.binary_twos_complement(value)
-        # self.client.write_register(address=0x16, value=self.test_speed, slave=self.slave_address)
-        self._write_register_debug(0x16, self.test_speed, "TestSpeed")
-
-    # === Write Performance - accel (TEST mode) (0x17) ===
-    def write_test_accel(self, value=None):
-        self.test_accel = self.binary_twos_complement(value)
-        # self.client.write_register(address=0x17, value=self.test_accel, slave=self.slave_address)
-        self._write_register_debug(0x17, self.test_accel, "TestAccel")
-
-    # === Write Precision - Init pos (TEST mode) (0x18) ===
-    def write_test_init_pos(self, init_pos=None):
-        self.test_init_pos = self.binary_twos_complement(init_pos)
-        # self.client.write_register(address=0x18, value=self.test_init_pos, slave=self.slave_address)
-        self._write_register_debug(0x18, self.test_init_pos, "TestInitPos")
-
-    # === Write Precision - Target pos (TEST mode) (0x19) ===
-    def write_test_target_pos(self, target_pos=None):
-        self.test_target_pos = self.binary_twos_complement(target_pos)
-        # self.client.write_register(address=0x19, value=self.test_target_pos, slave=self.slave_address)
-        self._write_register_debug(0x19, self.test_target_pos, "TestTargetPos")
-
-    # === Write Precision - #Repeat (sign = unit) (TEST mode) (0x20) ===
-    def write_test_repeat(self, repeat=None):
-        self.test_repeat_w_unit = self.binary_twos_complement(repeat)
-        # self.client.write_register(address=0x20, value=self.test_repeat_w_unit, slave=self.slave_address)
-        self._write_register_debug(0x20, self.test_repeat_w_unit, "TestRepeat")
-
-    # === Write Pick & Place Hole  #1-#5 (AUTO) (0x21 - 0x30) ===
-    def write_pick_place_hole(self, address, value):
-        signed_value = self.binary_twos_complement(value)
-        self._write_register_debug(address, signed_value, f"Pick Place")
-           
-
-    # === Write Point to Point (unit) (0x31) ===
-    def write_p2p_unit(self, unit=None):
-        if unit == 'degree':
-            self.p2p_unit = 0b0000 
-        elif unit == 'index':
-            self.p2p_unit = 0b0001
-        # self.client.write_register(address=0x31, value=self.p2p_unit, slave=self.slave_address)
-        self._write_register_debug(0x31, self.p2p_unit, f"P2P Unit {unit}")
-
-    # === Write Point to Point (value) (0x32) ===
-    def write_p2p_value(self, value=None):
-        self.p2p_value = self.binary_twos_complement(value)
-        # self.client.write_register(address=0x32, value=self.p2p_value, slave=self.slave_address)
-        self._write_register_debug(0x32, self.p2p_value, "P2P Value")
-
-    # === Read Emergenct status (0x33) ===
+    # === Robot emergency state (0x31) ===
     def read_emergency_stop_status(self):
-        emergency_stop_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x33]))[::-1]
-        self.emergency_stop_status = (emergency_stop_binary[0] == '1')  # Emergency Stop Status
+        emergency_stop_binary = self.binary_crop(4, self.decimal_to_binary(self.register.registers[0x31]))[::-1]
+        self.emergency_stop_status = (emergency_stop_binary[0] == '1')  # READ 0x31
 
-    # === Write Stop process (0x34) ===
-    def write_stop_process(self, command):
-        if command == 'Normal':
-            self.stop_process_register = 0b0000   
-        elif command == 'Stop':
-            self.stop_process_register = 0b0001
-        # self.client.write_register(address=0x34, value=self.stop_process_register, slave=self.slave_address)
-        self._write_register_debug(0x34, self.stop_process_register, f"StopProcess {command}")

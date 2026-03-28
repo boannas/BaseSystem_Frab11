@@ -1,286 +1,334 @@
-# Base System 
-The Base System with user interfce for FRA263/264 (Robotics Studio III)
+# Base System — How it works (FRA263 / FRA264)
+
+This document describes the **Base System** application that runs on the PC: what it connects to, **how data moves**, and **what each Modbus register address means**. You use the program as provided; you do not need its internal source code to follow this guide.
 <!-- 
-## Installation
-### Requirements
-- Python 3.10+ (recommended)
-- STM32 connected via USB
-- Modbus RTU settings must match firmware: 19200 baud, 8 data bits, even parity, 1 stop bit (8E1) 
+For step-by-step connection checks and example messages, see **[`test.md`](test.md)**. -->
 
-### Setup Virtual Environment 
-1. Clone the repository
-```
-git clone xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-cd xxxxxxxx
-```
-
-2. Create Virtual Environment
-```
-python -m venv venv
-venv\Scripts\activate
-```
-
-3. Install Dependencies from requirements.txt
-Make sure your requirements.txt contains:
-```
-pymodbus>=3.3.0
-websockets>=16.0
-pyserial>=3.5
-```
-
-Then run 
-```
-pip install -r requirements.txt
-```
-
-Verify installation
-```
-pip list
-```
-
-you should see `pymodbus`, `websockets` and `pyserial`
-
-5. Run Backend
-```
-python server.py
-```
-
-you should see like this `WebSocket Server running ws://localhost:8765`  
-Then open the UI in your browser.
-Make sure the backend is running before pressing Connect. -->
-
-## Configuration
-
-### Serial Port (Windows – STM32 via ST-Link)
-
-1. Open **Device Manager**
-2. Expand **Ports (COM & LPT)**
-3. Look for:
-
-   STMicroelectronics STLink Virtual COM Port (COMx)
-
-4. Use that COM number in the UI.
-
-Example:
-If Device Manager shows:
-
-STMicroelectronics STLink Virtual COM Port (COM3)
-
-Then enter:
-- `3` in the Connect field.
-
-
-
-## How to use
-The robot control system operates through a **PC-based UI** communicating with an STM32 controller via Serial (COM) interface.
-The system supports multiple operation modes to ensure safe initialization, manual testing, and autonomous execution.
-
-1. Launching the Program 
-
-2. Operation Modes
-There are two main control modes available in the system:
-    1. Manual / Jog mode
-        - Activate this mode by click the `Jog Mode` xxxxxxxx
-        - The user manually control the `Theta` using a joystick.
-        - The current values of `Theta` is displayed live in GUI
-        - The user can move `Theta` in incremental degree by input the value and select direction (clockwise or counter clockwise)
-        - The user able to control the gripper state by toggle button for both `Upward` / `Downward` and `Grip` / `Release`
-
-    2. Auto mode
-        - Point to Point: the user can move the `Theta` by giving value (can select for Degree or saved hole index). [can repeatable go <> back] 
-        - Pick and Place: the user need to save the target holes (5 holes), this mode should input the index for pick and place, then press the `Start` button for execute the process.
-
-
-
-
-
-
-
-
-
-
-
-
-### **Protocal : Address & Function**
----
-#### **Register Address Table**
-
-| Address   | Description   | Operation |
-|---------- |----------     |---------- |
-| 0x00      | Heartbeat Protocol [NEED_ASK] | Read/Write |  
-| 0x01      | Base System Mode   | Write      | - 
-| 0x02      | Gripper Status       | Write | -
-| 0x03      | Gripper Movement Status     | Write| -
-| 0x04      | Gripper Movement Actual Status     | Read | -
-| 0x05      | Gripper Enable Checkbox      | Write | 
-| 0x10      | Theta Moving Status [NEED_ASK] | Read |
-| 0x11      | Theta Actual Position  | Read |
-| 0x12      | Theta Actual Velocity  | Read |
-| 0x13      | Theta Actual Acceleration  | Read |
-| 0x14      | Jog Mode (Command)     | Write |
-| 0x15      | Test Mode (Performance/Precision)  | Write|
-| 0x16      | (Test)Performance - Speed    | Write |
-| 0x17      | (Test)Performance - Accel    | Write |
-| 0x18      | (Test)Precision - Init pos   | Write |
-| 0x19      | (Test)Precision - Target pos  | Write |
-| 0x20      | (Test)Precision - # Repeat (sign = unit)  | Write  |
-| 0x21-0x25 | Pick Hole #1-#5 (sign = direction) [NOT_YET] | Write |
-| 0x26-0x30 | Place Hole #1-#5 (sign = direction) [NOT_YET] | Write | 
-| 0x31      | Point to Point (unit)    | Write | 
-| 0x32      | Point to Point (value)  | Write |
-| 0x33      | Emergency status   | Read |
-| 0x34      | Stop the process   | Write | 
 ---
 
-### Data Format
-#### 1. Base System Status (0x01)
-Controls the robot’s high-level operating mode and system actions, such as homing, manual operation, or autonomous execution from UI.
+## 1. What the Base System does (big picture)
 
-(Base System -> Robot)
-
-| Bit | Data in Binary | Data in Decimal | Description                                     |
-| --- | -------------------- | ------- | ----------------------------------------------- |
-| 0   | 0000 0000 0000 0001  | 1       | **Home Mode** – Execute homing         |
-| 1   | 0000 0000 0000 0010  | 2       | **Manual Mode** – Entered Jog / manual control          |
-| 2   | 0000 0000 0000 0100  | 4       | **Autonomous Mode** – Entered to automatic Mode|
-| 3   | 0000 0000 0000 1000  | 8       | **Set Home** – Execute home setting    |
-| 3   | 0000 0000 0001 0000  | 16       | **Test Mode** – Entered Test mode|
+1. You use the **web user interface (UI)** in the browser.
+2. The UI talks to the Base System over a **local WebSocket** (JSON messages on your PC).
+3. The Base System talks to the **robot controller (STM32)** over **USB serial** using **Modbus RTU**.
+4. Each side only sees its own link: the UI never speaks Modbus directly; the robot never sees the WebSocket.
 
 
-#### 2. Gripper Status (0x02) 
-Controls the gripper action (Open/Close) or sequence (Pick/Place) from UI.
+**Serial link (Modbus RTU)** — must match the robot firmware:
 
-(Base System -> Robot)
+| Setting   | Value   |
+|----------|---------|
+| Baud     | 19200   |
+| Data bits| 8       |
+| Parity   | Even    |
+| Stop bits| 1       |
 
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000 | 0 = Open | Gripper `Open` |
-| 0   | 0000 0000 0000 0001 | 1 = Close | Gripper `Close` |
-| 0   | 0000 0000 0000 0010 | 2 = Pick | Gripper `Pick` |
-| 0   | 0000 0000 0000 0011 | 3 = Place | Gripper `Place` |
+**Modbus slave address:** default **21** 
 
+---
 
-#### 3. Gripper Movement Status (0x03) 
-Commands the gripper linear movement direction from UI.
+## 2. How data is **sent** and **received**
 
-(Base System -> Robot)
+### 2.1 From PC to robot (**WRITE**)
 
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000  | 0 = Up | Up movement |
-| 0   | 0000 0000 0000 0001   | 1 = Down  | Down movement  |
+The Base System sends **Write Single Register** commands. Each write targets **one 16-bit holding register** at a time, identified by its **address** (hex below).
 
+- Some registers carry **bit patterns** (mode flags, gripper command codes).
+- Others carry **signed numbers** (−32768 … +32767). On the wire, negative values are sent as **16-bit two’s complement** (the same integer range, encoded as 0…65535).
 
-#### 4. Gripper Movement Actual Status (0x04) 
+### 2.1.1 Registers that are mainly “one bit active”
 
-Reports the status of the three limit (reed) switches on the gripper mechanism.
+Every holding register is still **16 bits** on the wire. For many **control** and **status** addresses, the firmware only defines **low bits** (often **bit 0** only, or bits **0–4**). The tables below add **decimal**, **hex**, and **binary (low bits)**.
 
-(Robot -> Base System)
+<!-- - **WRITE:** e.g. **0x01** (mode) uses **one** power-of-two at a time -> exactly **one** bit set among bits 0–4. **0x04, 0x06, 0x23, 0x25** use **bit 0** as on/off or choice.
+- **READ:** e.g. **0x26–0x27, 0x31** — each listed bit is **1 = active**, **0 = inactive** (unless the lab states otherwise). -->
 
-> [!IMPORTANT]  
-> **Reed Switch Configuration:**
-> 1. **UP:** `reed#1` (ON), `reed#2` (OFF)
-> 2. **DOWN:** `reed#1` (OFF), `reed#2` (ON)
-> 3. **GRIP:** `reed#3` (ON) | **RELEASE:** `reed#3` (OFF)
+Full **int16** magnitudes (jog, P2P value, test speeds, **0x28–0x30**) are **not** “one-hot bits”; use decimal / two’s complement for those.
 
+### 2.2 From robot to PC (**READ**)
 
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0001 | 0 / 1 | Reed Switch 1 (0 = Off, 1 = On) |
-| 1   | 0000 0000 0000 0010 | 0 / 2 | Reed Switch 2 (0 = Off, 1 = On) |
-| 2   | 0000 0000 0000 0100 | 0 / 4 | Reed Switch 3 (0 = Off, 1 = On) |
+The Base System periodically **reads a block** of holding registers starting at address **0x00**, through **0x31** (50 registers in one read). That gives:
 
+- **Heartbeat** value on **0x00**
+- **Status** on **0x26 … 0x31** (sensors, task, motion, emergency)
 
-#### 5. Gripper checkbox (0x05)
+The UI is updated from these read values (position, speed, gripper state, etc.).
 
-Gripper checkbox = enable / disable gripper actuation
-- 'OFF' -> Robot motion works, gripper does nothing
-- 'ON' -> Robot motion + gripper actions work
+### 2.3 Heartbeat (special case on **0x00**)
 
-(Base System -> Robot)
+| Who   | Action |
+|-------|--------|
+| Robot | Writes **22881** (“YA”) into register **0x00** when it expects a reply. |
+| Base System | Writes **18537** (“HI”) back into **0x00**. |
 
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000 | 0 | gripper `OFF` |
-| 0   | 0000 0000 0000 0001 | 1 | gripper `ON`  |
+If the Base System does not see the expected heartbeat pattern in time, the UI can show the link as **not alive**, even if the cable is plugged in.
 
+### 2.4 Numbers with a decimal place (position, speed, acceleration)
 
+For **READ** addresses **0x28, 0x29, 0x30**, the register holds a **signed integer** that is **10×** the real value:
 
-#### [NOT YET] 6. Theta Moving Status (0x10) 
+| Meaning        | Register | Decode |
+|----------------|----------|--------|
+| Real position  | 0x28     | `real = (signed raw) / 10` |
+| Real velocity  | 0x29     | same |
+| Real acceleration | 0x30  | same |
 
-Monitor the robot's internal state or which actions is currently performing.
+**Example:** if the read raw value is **1234**, the Base System shows **123.4** for that quantity.
 
-(Robot -> Base System)
+---
 
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0001 | 1 | Homing |
-| 1   | 0000 0000 0000 0010 | 2 |  Go Pick |
-| 2   | 0000 0000 0000 0100 | 4 |  Go place |
-| 3   | 0000 0000 0000 1000 | 8 |  Go Point |
-<!-- | 4   | 0000 0000 0001 0000 | 16 |   | -->
+## 3. WRITE register map — commands the PC sends to the robot
 
+Every row is something the Base System can **write** when you use the UI. Addresses are **hexadecimal**.
 
+### 3.1 Summary table (all write addresses)
 
-#### 7. Position / Speed / Accelation (0x11 to 0x13) 
-Moniter the robot's actual position, speed, accelation. Must contain only two decimal place, before sending the values to the `Base System`, multiply the actual value to 10 (Base_system_value = Actual_value * 10)
+| Addr | Topic | Short description |
+|-----:|--------|-------------------|
+| **0x00** | Heartbeat | Reply **HI (18537)** when robot sends **YA (22881)** on read. |
+| **0x01** | Operating mode | Select Home / Jog / Auto / Set home / Test (one flag value at a time). |
+| **0x02** | Manual gripper motion | Up, Down, Open, Close (encoded values below). |
+| **0x03** | Gripper sequence | Pick or Place. |
+| **0x04** | Gripper in AUTO | Enable or disable gripper actions during automatic motion. |
+| **0x05** | Jog | Signed step size in **degrees** (+ = CCW, − = CW). |
+| **0x06** | Test type | Performance vs Precision test. |
+| **0x07** | Performance test | Desired velocity. |
+| **0x08** | Performance test | Desired acceleration. |
+| **0x09** | Precision test | Initial position. |
+| **0x10** | Precision test | Final (target) position. |
+| **0x11** | Precision test | Repeat count; **sign** selects **unit** (degree vs index — see 3.6). |
+| **0x12 – 0x21** | Pick & place | Sequence slots: hole index and direction per slot (signed int16). |
+| **0x22** | Pick & place | Number of **pairs** (pick+place) in the sequence. |
+| **0x23** | Point-to-point | Unit: **degree** or **saved index**. |
+| **0x24** | Point-to-point | Target value (signed), interpreted using **0x23**. |
+| **0x25** | Safety | Soft stop: run vs stop. |
 
-> Example: If the value of the position you want to send is '123.4', multiply by 10 to get '1234', and send this value to the address z-axis Actual position (0x11). This will appear in Base-system as '123.4'  
+---
 
-(Robot -> Base System)
+### 3.2 **0x01** — Operating mode (single bit “on” among bits 0–4)
 
+The UI sends **one** value to **0x01**. Each value is a **power of two**: in binary, **exactly one** of the low bits is **1** (one-hot style for mode select).
 
-#### 8. Jog Mode (command) (0x14)
-This address will contain the discrete degree robot should move and the sign is for counter clockwise (CCW -> +) and clockwise (CW -> -) (int16)
+| Bit | Mask (dec) | Mask (hex) | Low 5 bits (binary) | Mode / command |
+|:---:|:----------:|:----------:|:-------------------:|----------------|
+| **0** | **1** | 0x0001 | `0b00001` | Go home |
+| **1** | **2** | 0x0002 | `0b00010` | Manual / Jog |
+| **2** | **4** | 0x0004 | `0b00100` | Auto |
+| **3** | **8** | 0x0008 | `0b01000` | Set home |
+| **4** | **16** | 0x0010 | `0b10000` | Test |
 
+The full register is 16 bits; bits **5–15** are **0** in normal use unless firmware defines more.
 
-#### 9. (TEST) Performance / Precision mode (0x15)
+---
 
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000 | 0 | Precision mode  |
-| 0   | 0000 0000 0000 0001 | 1 | Performance mode      |
+### 3.3 **0x02** — Gripper: Up / Down / Open / Close (manual)
 
-#### 10. (TEST) Performance - Speed (0x16)
+Each command writes a **different code**; values **1, 2, 4** are **single-bit masks** in bits 0–2 (**Up** is all bits clear in that group).
 
-#### 11. (TEST) Performance - Accel (0x17)
+| Command | Dec | Hex | Low 4 bits (binary) | Note |
+|---------|----:|----:|:-------------------:|------|
+| Up      | **0** | 0x0000 | `0b0000` | No command bits set |
+| Down    | **1** | 0x0001 | `0b0001` | **bit 0** |
+| Open    | **2** | 0x0002 | `0b0010` | **bit 1** |
+| Close   | **4** | 0x0004 | `0b0100` | **bit 2** |
 
-#### 12. (TEST) Precision - Initital position (0x18)
+---
 
-#### 13. (TEST) Precision - Target position (0x19)
+### 3.4 **0x03** — Gripper: Pick / Place
 
-#### 14. (TEST) Precision - # Repeat (sign = unit) (0x20)
+| Command | Dec | Hex | Low 2 bits (binary) | Active bit |
+|---------|----:|----:|:-------------------:|:----------:|
+| Pick    | **1** | 0x0001 | `0b01` | **bit 0** |
+| Place   | **2** | 0x0002 | `0b10` | **bit 1** |
 
-#### 15. Pick Hole #1-#5 (sign = direction) (0x21 - 0x25)
+---
 
-#### 16. Place Hole #1-#5 (sign = direction) (0x26 - 0x30)
+### 3.5 **0x04** — Gripper enable (used with AUTO)
 
-#### 17. Point to Point (unit) (0x31)
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000 | 0 | Degree |
-| 0   | 0000 0000 0000 0001 | 1 | Index  |
+Only **bit 0** is used as enable; rest of the register is **0** in normal use.
 
+| Dec | Hex | Binary (low 4) | **bit 0** | Meaning |
+|----:|----:|:--------------:|:---------:|---------|
+| **0** | 0x0000 | `0b0000` | **0** | Gripper **disabled** during auto |
+| **1** | 0x0001 | `0b0001` | **1** | Gripper **enabled** during auto |
 
-#### 18. Point to Point (value) (0x32)
+---
 
-#### 19. Emergency Status (0x33)
+### 3.6 **0x05** — Jog (degrees)
 
-This receive the `Emergency button state` from the robot
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000 | 0 | Emergency `Did not pressed`|
-| 0   | 0000 0000 0000 0001 | 1 | Emergency `Pressed`  |
+| Content | Type | Meaning |
+|---------|------|---------|
+| Signed int16 | degrees step | **Positive** -> counter-clockwise (CCW). **Negative** -> clockwise (CW). |
 
-#### 20. Stop the process (0x34)
+---
 
-Stop the robot's process.
+### 3.7 **0x06 – 0x11** — Test modes
 
-| Bit | Data in Binary | Data in Decimal | Meaning |
-| ----- | ----- | ----- | ----- |
-| 0   | 0000 0000 0000 0000 | 0 | Robot's run normally  |
-| 0   | 0000 0000 0000 0001 | 1 | Stop the process      |
+| Addr | Name | Value / type | Meaning |
+|-----:|------|----------------|----------|
+| **0x06** | Test mode | **0** / **1** (see bit table below) | Precision vs Performance |
+| **0x07** | Performance | Signed int16 | Desired **velocity** |
+| **0x08** | Performance | Signed int16 | Desired **acceleration** |
+| **0x09** | Precision | Signed int16 | **Initial** position |
+| **0x10** | Precision | Signed int16 | **Final** position |
+| **0x11** | Precision | Signed int16 | **Repetition count**; **sign** encodes **unit** for repeats (positive -> degree vs negative -> index)  |
 
+**0x06 — binary (test type, bit 0 only):**
 
+| Dec | Hex | Low 2 bits | **bit 0** | Meaning |
+|----:|----:|:----------:|:---------:|---------|
+| **0** | 0x0000 | `0b0` | **0** | Precision test |
+| **1** | 0x0001 | `0b1` | **1** | Performance test |
 
+---
 
+### 3.8 **0x12 – 0x21** — Pick and place sequence
+
+There are **10 consecutive addresses** (**0x12** through **0x21**). Each holds **one signed 16-bit value** for one step of the programmed sequence.
+
+| Concept | Rule |
+|---------|------|
+| **Magnitude** | Hole **index** (e.g. 1…5). |
+| **Sign** | **+** -> counter-clockwise, **−** -> clockwise.|
+
+The Base System fills these from your pick/place plan in the UI, then writes **0x22**.
+
+---
+
+### 3.9 **0x22** — Number of pick–place pairs
+
+| Content | Meaning |
+|---------|---------|
+| Unsigned count | How many **pairs** (pick + place) the sequence contains. |
+
+---
+
+### 3.10 **0x23** — Point-to-point: unit
+
+Only **bit 0** selects the unit; **0** = degree, **1** = index.
+
+| Dec | Hex | Low 2 bits | **bit 0** | Unit for **0x24** |
+|----:|----:|:----------:|:---------:|-------------------|
+| **0** | 0x0000 | `0b0` | **0** | **Degree** |
+| **1** | 0x0001 | `0b1` | **1** | **Index**  |
+
+---
+
+### 3.11 **0x24** — Point-to-point: target
+
+| Content | Meaning |
+|---------|---------|
+| Signed int16 | Target **degrees** or **index**, depending on **0x23**. Sign indicates direction where the motion planner uses it. |
+
+---
+
+### 3.12 **0x25** — Soft stop
+
+| Dec | Hex | Low 2 bits | **bit 0** | Meaning |
+|----:|----:|:----------:|:---------:|---------|
+| **0** | 0x0000 | `0b0` | **0** | Normal running |
+| **1** | 0x0001 | `0b1` | **1** | Request **soft stop** |
+
+---
+
+## 4. READ register map — status the robot sends to the PC
+
+The Base System **reads** these to refresh the UI. Block read covers **0x00** and **0x26 … 0x31**.
+
+### 4.1 Summary table
+
+| Addr | Name | What you use it for |
+|-----:|------|---------------------|
+| **0x00** | Heartbeat | Link life; robot sends **YA (22881)**; PC answers **HI** on write. |
+| **0x26** | Lead / reed sensors | Physical gripper limits and jaw state (bits). |
+| **0x27** | Current task | What the motion sequencer is doing (Homing, Pick, Place, etc.). |
+| **0x28** | Position | θ position vs current home (**÷ 10** for display). |
+| **0x29** | Velocity | **÷ 10** for display. |
+| **0x30** | Acceleration | **÷ 10** for display. |
+| **0x31** | Emergency | Emergency input / safety state (bit). |
+
+---
+
+### 4.2 **0x26** — Lead / reed sensors (typical bit meaning)
+
+Low bits of the register describe **three reed switches** (on/off). The Base System derives gripper **height** and **jaw** labels for the UI.
+
+| Bit | Mask (hex) | Weight | Binary place | **1 =** | Meaning (hardware) |
+|:---:|:----------:|:------:|:------------:|---------|---------------------|
+| **0** | 0x0001 | 1 | `...0001` | Reed 1 **ON** | Often paired with bit 1 for **up/down** |
+| **1** | 0x0002 | 2 | `...0010` | Reed 2 **ON** | |
+| **2** | 0x0004 | 4 | `...0100` | Reed 3 **ON** | Often **jaw closed** when active |
+
+**Example raw value:** if **only** bits 0 and 2 are high -> `0b0101` -> dec **5** (0x0005). Compare to what you read on the bus after masking the low 4 bits.
+
+**Typical interpretation (when bits are wired as in the lab):**
+
+| Reed 1 | Reed 2 | UI show |
+|:------:|:------:|-------------|
+| ON | OFF | Up |
+| OFF | ON | Down |
+| other | other | Idle / between |
+
+| Reed 3 | UI show |
+|:------:|----------------|
+| ON | Closed |
+| OFF | Open |
+
+<!-- Exact wiring is defined on the robot; the **register** is always **0x26**. -->
+
+---
+
+### 4.3 **0x27** — Current robot task 
+
+The Base System reads low bits and picks **one** task name (first match in this order). Each row is **“this bit = 1”** (other bits may be 0 or 1 depending on firmware; priority order is as implemented in the Base System).
+
+| Bit | Mask (hex) | Mask (dec) | Low 4 bits (example **only** this bit) | Shown task |
+|:---:|:----------:|:----------:|:---------------------------------------:|------------|
+| **0** | 0x0001 | 1 | `0b0001` | Homing |
+| **1** | 0x0002 | 2 | `0b0010` | Go Pick |
+| **2** | 0x0004 | 4 | `0b0100` | Go Place |
+| **3** | 0x0008 | 8 | `0b1000` | Go Point |
+| — | — | **0** | `0b0000` | Idle (if none of the above match) |
+
+---
+
+### 4.4 **0x28, 0x29, 0x30** — Motion feedback (scaled ×10)
+
+| Addr   | Quantity | Decode |
+|--------|----------|--------|
+| **0x28** | Position | signed raw **÷ 10** = user units |
+| **0x29** | Velocity | signed raw **÷ 10** |
+| **0x30** | Acceleration | signed raw **÷ 10** |
+
+---
+
+### 4.5 **0x31** — Emergency / safety state
+
+Typically only **bit 0** is defined; treat **1** as “active / latched” per lab.
+
+| Dec (if only bit0 matters) | Hex | Low 2 bits | **bit 0** | Meaning |
+|---------------------------:|----:|:----------:|:---------:|---------|
+| **0** | 0x0000 | `0b0` | **0** | Not in emergency (normal) |
+| **1** | 0x0001 | `0b1` | **1** | Emergency active (e.g. E-stop / interlock — per firmware) |
+
+---
+
+## 5. Two’s complement (for signed registers)
+
+If you read or write a **signed** value as a raw 16-bit number:
+
+| If raw ≥ 32768 | Signed value = raw − 65536 |
+|----------------|----------------------------|
+| Else           | Signed value = raw |
+
+**Example:** raw **65413** -> signed **−123**. After **÷ 10** on 0x28–0x30, that is **−12.3** in display units.
+
+---
+
+## 6. Windows: which COM port to choose
+
+1. Open **Device Manager** -> **Ports (COM & LPT)**.
+2. Find **STMicroelectronics STLink Virtual COM Port (COMx)**.
+3. In the Base System connect dialog, enter that **COM** number (**x**).
+
+---
