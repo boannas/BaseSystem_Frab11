@@ -25,14 +25,17 @@ robot_state = {
     "emergency": "Idle",
 }
 
-HB_DEAD_TIMEOUT = 0.8   
-HB_HI = 18537       # HI 
+HB_DEAD_TIMEOUT = 0.8
+HB_HI = 18537       # HI
 HB_YA = 22881       # YA
+# Pause between STATS broadcasts / Modbus polls (avoid busy-loop + websocket flood)
+STATS_INTERVAL = 0.05
 
 modbus_lock = asyncio.Lock()
 
 async def stats_loop(websocket):
-    last_seen_ya_time = 0.0
+    # None until first YA; avoids treating t=0 as a valid "last seen" time
+    last_seen_ya_time = None
     try:
         while True:
             ok = False
@@ -46,7 +49,7 @@ async def stats_loop(websocket):
                         hb_val = protocol.hb_val
                         if hb_val == HB_YA:
                             last_seen_ya_time = time.perf_counter()
-                            sent_hi, _ = await asyncio.to_thread(protocol.heartbeat_from_routine)
+                            await asyncio.to_thread(protocol.heartbeat_from_routine)
 
                         robot_state["position"] = protocol.theta_actual_pos
                         robot_state["speed"] = protocol.theta_actual_speed
@@ -74,12 +77,17 @@ async def stats_loop(websocket):
                         else:
                             robot_state["gripper_jaw"] = "Idle"
             
-            # Check heartbeat are Normal
-            dt = time.perf_counter() - last_seen_ya_time
-            alive = dt <= HB_DEAD_TIMEOUT
-            connected = bool(protocol.client) and protocol.is_connected() and alive
+            # Heartbeat: YA must have been seen within HB_DEAD_TIMEOUT
+            if last_seen_ya_time is None:
+                alive = False
+            else:
+                alive = (time.perf_counter() - last_seen_ya_time) <= HB_DEAD_TIMEOUT
+            connected = int(bool(protocol.client) and protocol.is_connected() and alive)
+            # print('connected:', connected)
 
-            # print()
+            if connected == 0:
+                print("[ERROR] Lost connection to robot. Connection or heartbeat may be the issue.")
+
             payload = {
                 "type": "STATS",
                 "pos": robot_state["position"],
@@ -88,14 +96,14 @@ async def stats_loop(websocket):
                 "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
                 "mode": robot_state["mode"],
                 "emergency": robot_state["emergency"],
-                "heartbeat": connected 
+                "heartbeat": connected
             }
 
             try:
                 await websocket.send(json.dumps(payload))
             except ConnectionClosed:
                 break
-            # await asyncio.sleep(HB_PERIOD)
+            await asyncio.sleep(STATS_INTERVAL)
     except asyncio.CancelledError:
         pass
 
@@ -176,6 +184,7 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
             # ---------------- MANUAL / JOG ----------------
             elif req_mode == "Manual":
                 if action == "set_manual":  # WRITE 0x01 — Jog operating mode
+
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_base_system_status, "Jog")
                     continue
