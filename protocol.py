@@ -1,4 +1,5 @@
-import platform 
+import platform
+import time as pytime
 from pymodbus.client import ModbusSerialClient as ModbusClient
 
 
@@ -143,12 +144,12 @@ class Protocol(Binary):
 
             self.client = ModbusClient(
                 port=com_port,
-                baudrate=19200,
+                baudrate=230400,
                 parity="E",
                 stopbits=1,
                 bytesize=8,
-                timeout=1,
-                retries=1,
+                timeout=0.01,
+                retries=0, 
             )
             ok = self.client.connect()
             self.usb_connect = bool(ok)
@@ -173,10 +174,15 @@ class Protocol(Binary):
             self.routine_normal = False
             return False
         
+        t0 = pytime.perf_counter()
+        # Read Heartbeat
         rr = self.client.read_holding_registers(address=0x00, count=MAX_ADDRESS+1, slave=self.slave_address)
         if rr is None or rr.isError() or not hasattr(rr, "registers"):
             self.routine_normal = False
             return False 
+        t1 = pytime.perf_counter()
+
+        # print(f"Heartbeat read: {(t1-t0)*1000:.1f} ms")
 
         self.register = rr
 
@@ -191,6 +197,84 @@ class Protocol(Binary):
         self.routine_normal = True
         return True
 
+    # def routine(self):
+    #     if not self.client:
+    #         self.routine_normal = False
+    #         return False
+        
+    #     t0 = pytime.perf_counter()
+    #     # Read heartbeat only
+    #     rr_hb = self.client.read_holding_registers(
+    #         address=0x00,
+    #         count=1,
+    #         slave=self.slave_address
+    #     )
+    #     t1 = pytime.perf_counter()
+
+
+
+    #     # Read status block 0x26–0x31
+    #     rr_status = self.client.read_holding_registers(
+    #         address=0x00,
+    #         # count=0x31 - 0x26 + 1,
+    #         count=MAX_ADDRESS + 1,
+    #         slave=self.slave_address
+    #     )
+    #     t2 = pytime.perf_counter()
+
+    #     print(f"hb read: {(t1-t0)*1000:.1f} ms, status read: {(t2-t1)*1000:.1f} ms")
+    #     # print(status[0], status[1], status[2], status[3], status[10], status[11])
+
+    #     # Status index
+    #     # 0x26 : [0]
+    #     # 0x27 : [1]
+    #     # 0x28 : [2]
+    #     # 0x29 : [3]
+    #     # 0x30 : [10]
+    #     # 0x31 : [11]
+
+    #     if (
+    #         rr_hb is None or rr_hb.isError() or not hasattr(rr_hb, "registers") or
+    #         rr_status is None or rr_status.isError() or not hasattr(rr_status, "registers")
+    #     ):
+    #         self.routine_normal = False
+    #         return False
+
+    #     self.hb_val = rr_hb.registers[0]
+
+    #     status = rr_status.registers
+
+    #     self.gripper_actual_reed1 = bool(status[0] & 0b0001)  # 0x26
+    #     self.gripper_actual_reed2 = bool(status[0] & 0b0010)  # 0x26
+    #     self.gripper_actual_reed3 = bool(status[0] & 0b0100)  # 0x26
+
+    #     moving = status[1]  # 0x27
+
+    #     # print(f"Moving status raw: {moving:016b}")
+    #     self.moving_status_previous = self.moving_status
+
+    #     if moving & 0b000001:
+    #         self.moving_status = "Homing"
+    #     elif moving & 0b000010:
+    #         self.moving_status = "Go Pick"
+    #     elif moving & 0b000100:
+    #         self.moving_status = "Go Place"
+    #     elif moving & 0b001000:
+    #         self.moving_status = "Go Point"
+    #     else:
+    #         self.moving_status = "Idle"
+
+    #     self.theta_actual_pos = self.binary_reverse_twos_complement(status[2]) / 10.0  # 0x28
+    #     self.theta_actual_speed = self.binary_reverse_twos_complement(status[3]) / 10.0  # 0x29
+    #     self.theta_actual_accel = self.binary_reverse_twos_complement(status[10]) / 10.0  # 0x30
+
+    #     # print(f"Position: {self.theta_actual_pos} deg, Speed: {self.theta_actual_speed} deg/s, Accel: {self.theta_actual_accel} deg/s²")
+    #     # print(f"Emergency stop raw: {status[11]:016b}")
+    #     self.emergency_stop_status = bool(status[11] & 0b0001)  # 0x31
+
+    #     self.routine_normal = True
+    #     return True
+    
 #### STATUS + Connection
     # === Heartbeat Functions (0x00) ===
     def write_heartbeat_hi(self) -> bool:

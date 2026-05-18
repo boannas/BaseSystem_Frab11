@@ -29,13 +29,18 @@ HB_DEAD_TIMEOUT = 0.8
 HB_HI = 18537       # HI
 HB_YA = 22881       # YA
 # Pause between STATS broadcasts / Modbus polls (avoid busy-loop + websocket flood)
-STATS_INTERVAL = 0.05
+STATS_INTERVAL = 0.001
 
 modbus_lock = asyncio.Lock()
 
 async def stats_loop(websocket):
     # None until first YA; avoids treating t=0 as a valid "last seen" time
     last_seen_ya_time = None
+    freq_count = 0
+    freq_t0 = time.perf_counter()
+    last_hb_write = 0
+
+
     try:
         while True:
             ok = False
@@ -45,11 +50,22 @@ async def stats_loop(websocket):
                     # ONE READ for everything
                     ok = await asyncio.to_thread(protocol.routine)
 
+                    freq_count += 1
+                    now = time.perf_counter()
+                    if now - freq_t0 >= 1.0:
+                        print(f"[FREQ] Modbus poll: {freq_count / (now - freq_t0):.1f} Hz")
+                        freq_count = 0
+                        freq_t0 = now
+
                     if ok:
                         hb_val = protocol.hb_val
                         if hb_val == HB_YA:
-                            last_seen_ya_time = time.perf_counter()
-                            await asyncio.to_thread(protocol.heartbeat_from_routine)
+                            last_seen_ya_time = now 
+
+                            # Write Heartbeat back to robot every 0.2s (5 Hz) if YA is seen
+                            if now - last_hb_write >= 0.2 :
+                                await asyncio.to_thread(protocol.heartbeat_from_routine)
+                                last_hb_write = now
 
                         robot_state["position"] = protocol.theta_actual_pos
                         robot_state["speed"] = protocol.theta_actual_speed
@@ -103,7 +119,7 @@ async def stats_loop(websocket):
                 await websocket.send(json.dumps(payload))
             except ConnectionClosed:
                 break
-            await asyncio.sleep(STATS_INTERVAL)
+            # await asyncio.sleep(STATS_INTERVAL)
     except asyncio.CancelledError:
         pass
 
