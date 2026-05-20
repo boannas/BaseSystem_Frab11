@@ -1,10 +1,12 @@
 # server.py
 import asyncio
 import json
+import pylsl
 import websockets
 from websockets.exceptions import ConnectionClosed
 from protocol import Protocol
 import time
+from pylsl import StreamInfo, StreamOutlet, local_clock
 
 # Modbus Protocol
 protocol = Protocol()
@@ -32,6 +34,31 @@ HB_YA = 22881       # YA
 STATS_INTERVAL = 0.001
 
 modbus_lock = asyncio.Lock()
+
+# LSL StreamInfo for robot states (position, speed, accel)
+actual_state = pylsl.StreamInfo(
+    name="ActualStates",
+    type="States",
+    channel_count=3, # position, speed, accel
+    nominal_srate=STATS_INTERVAL**-1,
+    channel_format="float32",
+    source_id="mock_robot_controller-actual_states"
+)
+
+# LSL StreamInfo for events 
+event_info = pylsl.StreamInfo(
+    name="EventTrigger",
+    type="Trigger",
+    channel_count=1,
+    nominal_srate=pylsl.IRREGULAR_RATE,
+    channel_format="string",
+    source_id="mock_robot_controller-event_trigger"
+)
+
+# Create LSL outlets
+states_outlet = pylsl.StreamOutlet(actual_state)
+event_outlet = pylsl.StreamOutlet(event_info)
+
 
 async def stats_loop(websocket):
     # None until first YA; avoids treating t=0 as a valid "last seen" time
@@ -115,11 +142,18 @@ async def stats_loop(websocket):
                 "heartbeat": connected
             }
 
+            # Push states to LSL outlet
+            states_outlet.push_sample([
+                float(protocol.theta_actual_pos),
+                float(protocol.theta_actual_speed),
+                float(protocol.theta_actual_accel)
+            ])
+            
             try:
                 await websocket.send(json.dumps(payload))
             except ConnectionClosed:
                 break
-            # await asyncio.sleep(STATS_INTERVAL)
+            await asyncio.sleep(STATS_INTERVAL)
     except asyncio.CancelledError:
         pass
 
@@ -200,7 +234,7 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
             # ---------------- MANUAL / JOG ----------------
             elif req_mode == "Manual":
                 if action == "set_manual":  # WRITE 0x01 — Jog operating mode
-
+                    
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_base_system_status, "Jog")
                     continue
@@ -242,6 +276,16 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     value = data.get('value')
                     direction = '+' if data.get('direction') == 'CCW' else '-'
                     jog_value = int(str(direction) + str(value))
+
+                    payload = {
+                        "mode": req_mode,
+                        "action": action,
+                        "value": value,
+                        "direction": data.get('direction'),
+                        "timestamp": time.time()
+                    }
+                    event_outlet.push_sample([json.dumps(payload)])
+
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_jog, jog_value)
                     continue
@@ -265,6 +309,16 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                         for pos, d in zip(order_sequence[1:], direction_sequence)
                     ]
                     # print("encode:", encode)
+
+                    payload = {
+                        "mode": req_mode,
+                        "action": action,
+                        "order_sequence": order_sequence,
+                        "direction_sequence": direction_sequence,
+                        "use_gripper": gripper_enable,
+                        "timestamp": time.time()
+                    }
+                    event_outlet.push_sample([json.dumps(payload)])
 
                     async with modbus_lock:
                         # WRITE 0x12–0x21 — pick/place per hole + direction
@@ -299,6 +353,16 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                 elif action == 'point_to_point':    
                     p2p_unit = data.get('unit')
                     p2p_value = data.get('value')
+
+                    payload = {
+                        "mode": req_mode,
+                        "action": action,
+                        "unit": p2p_unit,
+                        "value": p2p_value,
+                        "timestamp": time.time()
+                    }
+                    event_outlet.push_sample([json.dumps(payload)])
+
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_p2p_unit, p2p_unit)      # WRITE 0x23 — P2P unit
                         await asyncio.to_thread(protocol.write_p2p_value, p2p_value)    # WRITE 0x24 — P2P position
@@ -315,6 +379,16 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     speed_test = data.get('speed')
                     accel_test = data.get('accel')
 
+                    event_payload = {
+                        "mode": req_mode,
+                        "action": action,
+                        "speed": speed_test,
+                        "accel": accel_test,
+                        "timestamp": time.time()
+                    }
+
+                    event_outlet.push_sample([json.dumps(event_payload)])
+
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_test_mode, 'Performance')    # WRITE 0x06
                         await asyncio.to_thread(protocol.write_test_speed, speed_test)      # WRITE 0x07
@@ -329,6 +403,18 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                     
                     unit_sign = '+' if unit_test == 'degree' else '-'
                     repeat_w_unit = int(str(unit_sign) + str(repeat_test))
+
+                    event_payload = {
+                        "mode": req_mode,
+                        "action": action,
+                        "init_pos": init_pos_test,
+                        "target_pos": target_pos_test,
+                        "repeat": repeat_test,
+                        "unit": unit_test,
+                        "timestamp": time.time()
+                    }
+                    event_outlet.push_sample([json.dumps(event_payload)])
+
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_test_mode, 'Precision')      # WRITE 0x06
                         await asyncio.to_thread(protocol.write_test_init_pos, init_pos_test)        # WRITE 0x09
@@ -366,6 +452,15 @@ async def main():
         print("WebSocket Server running ws://localhost:8765")
         await asyncio.Future()
 
+async def send_ack(websocket, mode, action, status="success", message=""):
+    await websocket.send(json.dumps({
+        "type": "ACK",
+        "mode": mode,
+        "action": action,
+        "status": status,
+        "message": message,
+        "timestamp": time.time()
+    }))
 
 if __name__ == "__main__":
     asyncio.run(main())
