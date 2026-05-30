@@ -1,6 +1,7 @@
-# Base System — How it works (FRA263 / FRA264)
+# Base System — Protocol / Register Map (FRA263 / FRA264)
 
-This document describes the **Base System** application that runs on the PC: what it connects to, **how data moves**, and **what each Modbus register address means**. You use the program as provided; you do not need its internal source code to follow this guide.
+This document describes the **Modbus register map** and data meanings used by the Base System.
+ 
 <!-- 
 For step-by-step connection checks and example messages, see **[`test.md`](test.md)**. -->
 
@@ -18,7 +19,7 @@ For step-by-step connection checks and example messages, see **[`test.md`](test.
 
 | Setting   | Value   |
 |----------|---------|
-| Baud     | 19200   |
+| Baud     | 230400  |
 | Data bits| 8       |
 | Parity   | Even    |
 | Stop bits| 1       |

@@ -31,7 +31,9 @@ HB_DEAD_TIMEOUT = 0.8
 HB_HI = 18537       # HI
 HB_YA = 22881       # YA
 # Pause between STATS broadcasts / Modbus polls (avoid busy-loop + websocket flood)
-STATS_INTERVAL = 0.001
+# STATS_INTERVAL = 0.001'
+STATS_HZ = 50.0
+STATS_INTERVAL = 1.0 / STATS_HZ   # 0.02 s = 20 ms
 
 modbus_lock = asyncio.Lock()
 
@@ -40,7 +42,7 @@ actual_state = pylsl.StreamInfo(
     name="ActualStates",
     type="States",
     channel_count=3, # position, speed, accel
-    nominal_srate=STATS_INTERVAL**-1,
+    nominal_srate=STATS_HZ,
     channel_format="float32",
     source_id="mock_robot_controller-actual_states"
 )
@@ -60,13 +62,123 @@ states_outlet = pylsl.StreamOutlet(actual_state)
 event_outlet = pylsl.StreamOutlet(event_info)
 
 
+# async def stats_loop(websocket):
+#     # None until first YA; avoids treating t=0 as a valid "last seen" time
+#     last_seen_ya_time = None
+#     freq_count = 0
+#     freq_t0 = time.perf_counter()
+#     last_hb_write = 0
+
+
+#     try:
+#         while True:
+#             ok = False
+
+#             if protocol.client and protocol.is_connected():
+#                 async with modbus_lock:
+#                     # ONE READ for everything
+#                     ok = await asyncio.to_thread(protocol.routine)
+
+#                     freq_count += 1
+#                     now = time.perf_counter()
+#                     if now - freq_t0 >= 1.0:
+#                         print(f"[FREQ] Modbus poll: {freq_count / (now - freq_t0):.1f} Hz")
+#                         freq_count = 0
+#                         freq_t0 = now
+
+#                     if ok:
+#                         hb_val = protocol.hb_val
+#                         if hb_val == HB_YA:
+#                             last_seen_ya_time = now 
+
+#                             # Write Heartbeat back to robot every 0.2s (5 Hz) if YA is seen
+#                             if now - last_hb_write >= 0.2 :
+#                                 await asyncio.to_thread(protocol.heartbeat_from_routine)
+#                                 last_hb_write = now
+
+#                         robot_state["position"] = protocol.theta_actual_pos
+#                         robot_state["speed"] = protocol.theta_actual_speed
+#                         robot_state["accel"] = protocol.theta_actual_accel
+#                         robot_state["emergency"] = protocol.emergency_stop_status
+#                         robot_state["mode"] = protocol.moving_status
+
+#                         # Gripper reeds from READ 0x26
+#                         reed1 = protocol.gripper_actual_reed1
+#                         reed2 = protocol.gripper_actual_reed2
+#                         reed3 = protocol.gripper_actual_reed3
+
+#                         # gripper Z direction 
+#                         robot_state["gripper_z"] = (
+#                             "Up" if (reed1 and not reed2) else
+#                             "Down" if (reed2 and not reed1) else
+#                             "Idle"
+#                         )
+
+#                         # gripper jaw
+#                         if reed3 is True:
+#                             robot_state["gripper_jaw"] = "Close"
+#                         elif reed3 is False:
+#                             robot_state["gripper_jaw"] = "Open"
+#                         else:
+#                             robot_state["gripper_jaw"] = "Idle"
+            
+#             # Heartbeat: YA must have been seen within HB_DEAD_TIMEOUT
+#             if last_seen_ya_time is None:
+#                 alive = False
+#             else:
+#                 alive = (time.perf_counter() - last_seen_ya_time) <= HB_DEAD_TIMEOUT
+#             connected = int(bool(protocol.client) and protocol.is_connected() and alive)
+#             # print('connected:', connected)
+
+#             if connected == 0:
+#                 print("[ERROR] Lost connection to robot. Connection or heartbeat may be the issue.")
+
+#             payload = {
+#                 "type": "STATS",
+#                 "pos": robot_state["position"],
+#                 "speed": robot_state["speed"],
+#                 "accel": robot_state["accel"],
+#                 "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
+#                 "mode": robot_state["mode"],
+#                 "emergency": robot_state["emergency"],
+#                 "heartbeat": connected
+#             }
+
+#             # Push states to LSL outlet
+#             states_outlet.push_sample([
+#                 float(protocol.theta_actual_pos),
+#                 float(protocol.theta_actual_speed),
+#                 float(protocol.theta_actual_accel)
+#             ],
+            
+#             timestamp=local_clock())
+            
+
+#             try:
+#                 await websocket.send(json.dumps(payload))
+#             except ConnectionClosed:
+#                 break
+#             # await asyncio.sleep(STATS_INTERVAL)
+#              # precise 50 Hz timing
+#             next_tick += STATS_INTERVAL
+#             sleep_time = next_tick - time.perf_counter()
+
+#             if sleep_time > 0:
+#                 await asyncio.sleep(sleep_time)
+#             else:
+#                 # loop is slower than 50 Hz; reset timing to avoid accumulating delay
+#                 next_tick = time.perf_counter()
+
+#     except asyncio.CancelledError:
+#         pass
+
 async def stats_loop(websocket):
-    # None until first YA; avoids treating t=0 as a valid "last seen" time
     last_seen_ya_time = None
     freq_count = 0
     freq_t0 = time.perf_counter()
     last_hb_write = 0
 
+    next_tick = time.perf_counter()
 
     try:
         while True:
@@ -74,7 +186,6 @@ async def stats_loop(websocket):
 
             if protocol.client and protocol.is_connected():
                 async with modbus_lock:
-                    # ONE READ for everything
                     ok = await asyncio.to_thread(protocol.routine)
 
                     freq_count += 1
@@ -87,10 +198,9 @@ async def stats_loop(websocket):
                     if ok:
                         hb_val = protocol.hb_val
                         if hb_val == HB_YA:
-                            last_seen_ya_time = now 
+                            last_seen_ya_time = now
 
-                            # Write Heartbeat back to robot every 0.2s (5 Hz) if YA is seen
-                            if now - last_hb_write >= 0.2 :
+                            if now - last_hb_write >= 0.2:
                                 await asyncio.to_thread(protocol.heartbeat_from_routine)
                                 last_hb_write = now
 
@@ -100,36 +210,29 @@ async def stats_loop(websocket):
                         robot_state["emergency"] = protocol.emergency_stop_status
                         robot_state["mode"] = protocol.moving_status
 
-                        # Gripper reeds from READ 0x26
                         reed1 = protocol.gripper_actual_reed1
                         reed2 = protocol.gripper_actual_reed2
                         reed3 = protocol.gripper_actual_reed3
 
-                        # gripper Z direction 
                         robot_state["gripper_z"] = (
                             "Up" if (reed1 and not reed2) else
                             "Down" if (reed2 and not reed1) else
                             "Idle"
                         )
 
-                        # gripper jaw
                         if reed3 is True:
                             robot_state["gripper_jaw"] = "Close"
                         elif reed3 is False:
                             robot_state["gripper_jaw"] = "Open"
                         else:
                             robot_state["gripper_jaw"] = "Idle"
-            
-            # Heartbeat: YA must have been seen within HB_DEAD_TIMEOUT
+
             if last_seen_ya_time is None:
                 alive = False
             else:
                 alive = (time.perf_counter() - last_seen_ya_time) <= HB_DEAD_TIMEOUT
-            connected = int(bool(protocol.client) and protocol.is_connected() and alive)
-            # print('connected:', connected)
 
-            if connected == 0:
-                print("[ERROR] Lost connection to robot. Connection or heartbeat may be the issue.")
+            connected = int(bool(protocol.client) and protocol.is_connected() and alive)
 
             payload = {
                 "type": "STATS",
@@ -142,21 +245,33 @@ async def stats_loop(websocket):
                 "heartbeat": connected
             }
 
-            # Push states to LSL outlet
-            states_outlet.push_sample([
-                float(protocol.theta_actual_pos),
-                float(protocol.theta_actual_speed),
-                float(protocol.theta_actual_accel)
-            ])
-            
+            states_outlet.push_sample(
+                [
+                    float(protocol.theta_actual_pos),
+                    float(protocol.theta_actual_speed),
+                    float(protocol.theta_actual_accel)
+                ],
+                timestamp=local_clock()
+            )
+
             try:
                 await websocket.send(json.dumps(payload))
             except ConnectionClosed:
                 break
-            await asyncio.sleep(STATS_INTERVAL)
+
+            # precise 50 Hz timing
+            next_tick += STATS_INTERVAL
+            sleep_time = next_tick - time.perf_counter()
+
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+            else:
+                # loop is slower than 50 Hz; reset timing to avoid accumulating delay
+                next_tick = time.perf_counter()
+
     except asyncio.CancelledError:
         pass
-
+    
 async def handler(websocket: websockets.WebSocketServerProtocol):
     print("React Client Connected!")
 
@@ -197,6 +312,9 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
             except json.JSONDecodeError:
                 await websocket.send(json.dumps({"mode": "Error", "message": "Invalid JSON"}))
                 continue
+
+            # print(f"[RECEIVED] {data}")
+
 
             req_mode = data.get("mode")
             action = data.get("action")
@@ -426,6 +544,11 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
             elif req_mode == "Stop" and action == 'stop':
                 async with modbus_lock:
                     await asyncio.to_thread(protocol.write_stop_process, 'Stop')    # WRITE 0x25 — soft stop
+                continue
+
+            elif req_mode == "Stop" and action == 'cancel_stop':
+                async with modbus_lock:
+                    await asyncio.to_thread(protocol.write_stop_process, 'Normal')    # WRITE 0x25 — cancel stop
                 continue
 
             else : 

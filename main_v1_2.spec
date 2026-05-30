@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='server_111',
+    name='main_v1_2',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
