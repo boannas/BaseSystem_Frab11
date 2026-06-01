@@ -282,7 +282,35 @@ class Protocol(Binary):
         if wr is None or (hasattr(wr, "isError") and wr.isError()):
             return False
         return True
+    def read_heartbeat_register(self) -> int | None:
+        """Read holding register 0x00 only (lightweight, for 5 Hz heartbeat loop)."""
+        if not self.client:
+            return None
+        rr = self.client.read_holding_registers(
+            address=0x00, count=1, slave=self.slave_address
+        )
+        if rr is None or rr.isError() or not hasattr(rr, "registers"):
+            return None
+        self.hb_val = rr.registers[0]
+        return self.hb_val
+
+    def heartbeat_tick(self) -> tuple[bool, bool]:
+        """
+        One heartbeat cycle at HB rate (e.g. 5 Hz):
+          1. Read reg 0x00
+          2. If value is YA (22881), write HI (18537) back
+
+        Returns (saw_ya, wrote_hi).
+        """
+        hb = self.read_heartbeat_register()
+        if hb is None:
+            return False, False
+        if hb == HB_YA:
+            return True, self.write_heartbeat_hi()
+        return False, False
+
     def heartbeat_from_routine(self):
+        """Legacy helper when hb_val was already read by routine()."""
         hb = getattr(self, "hb_val", None)
         if hb is None:
             return False, None

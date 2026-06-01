@@ -13,10 +13,10 @@ protocol = Protocol()
 
 # Server state
 server_state = {
-    "stats_task": None,   
+    "background_tasks": [],
 }
 
-# Robot stats
+# Robot stats (updated by modbus_status_loop; read by stats_broadcast_loop)
 robot_state = {
     "position": "--",
     "speed": "--",
@@ -27,13 +27,22 @@ robot_state = {
     "emergency": "Idle",
 }
 
+# Link / heartbeat state (updated by heartbeat_loop; read by stats_broadcast_loop)
+link_state = {
+    "last_ya_time": None,  # perf_counter() when reg 0x00 last equaled YA (22881)
+}
+
+# --- Loop rates (each loop is independent) ---
+STATS_HZ = 50.0                   # WebSocket + LSL: broadcast cached state
+HB_HZ = 5.0                       # Modbus: read 0x00 and reply HI when robot sends YA
+MODBUS_STATUS_HZ = 30.0           # Modbus: full read for pos / gripper / mode
+
+STATS_INTERVAL = 1.0 / STATS_HZ
+HB_INTERVAL = 1.0 / HB_HZ
+MODBUS_STATUS_INTERVAL = 1.0 / MODBUS_STATUS_HZ
+
+# Robot must send YA again within this window or UI shows heartbeat_alive=false
 HB_DEAD_TIMEOUT = 0.8
-HB_HI = 18537       # HI
-HB_YA = 22881       # YA
-# Pause between STATS broadcasts / Modbus polls (avoid busy-loop + websocket flood)
-# STATS_INTERVAL = 0.001'
-STATS_HZ = 50.0
-STATS_INTERVAL = 1.0 / STATS_HZ   # 0.02 s = 20 ms
 
 modbus_lock = asyncio.Lock()
 
@@ -62,230 +71,226 @@ states_outlet = pylsl.StreamOutlet(actual_state)
 event_outlet = pylsl.StreamOutlet(event_info)
 
 
-# async def stats_loop(websocket):
-#     # None until first YA; avoids treating t=0 as a valid "last seen" time
-#     last_seen_ya_time = None
-#     freq_count = 0
-#     freq_t0 = time.perf_counter()
-#     last_hb_write = 0
+async def _sleep_fixed_rate(next_tick: float, interval: float) -> float:
+    """Sleep until the next fixed-rate tick; reset if we fell behind."""
+    next_tick += interval
+    sleep_time = next_tick - time.perf_counter()
+    if sleep_time > 0:
+        await asyncio.sleep(sleep_time)
+    else:
+        next_tick = time.perf_counter()
+    return next_tick
 
 
-#     try:
-#         while True:
-#             ok = False
+async def _wait_stats_tick(next_tick: float) -> float:
+    """
+    Sleep-first 50 Hz scheduler: wait for the slot, then emit exactly one sample.
+    Keeps one STATS (+ LSL) sample every STATS_INTERVAL (20 ms → 50/s).
+    """
+    delay = next_tick - time.perf_counter()
+    if delay > 0:
+        await asyncio.sleep(delay)
+    return next_tick + STATS_INTERVAL
 
-#             if protocol.client and protocol.is_connected():
-#                 async with modbus_lock:
-#                     # ONE READ for everything
-#                     ok = await asyncio.to_thread(protocol.routine)
 
-#                     freq_count += 1
-#                     now = time.perf_counter()
-#                     if now - freq_t0 >= 1.0:
-#                         print(f"[FREQ] Modbus poll: {freq_count / (now - freq_t0):.1f} Hz")
-#                         freq_count = 0
-#                         freq_t0 = now
+def _lsl_motion_sample() -> list[float]:
+    """Float triplet for LSL outlet (position, speed, accel)."""
+    return [
+        float(protocol.theta_actual_pos),
+        float(protocol.theta_actual_speed),
+        float(protocol.theta_actual_accel),
+    ]
 
-#                     if ok:
-#                         hb_val = protocol.hb_val
-#                         if hb_val == HB_YA:
-#                             last_seen_ya_time = now 
 
-#                             # Write Heartbeat back to robot every 0.2s (5 Hz) if YA is seen
-#                             if now - last_hb_write >= 0.2 :
-#                                 await asyncio.to_thread(protocol.heartbeat_from_routine)
-#                                 last_hb_write = now
+def _serial_connected() -> bool:
+    return bool(protocol.client) and protocol.is_connected()
 
-#                         robot_state["position"] = protocol.theta_actual_pos
-#                         robot_state["speed"] = protocol.theta_actual_speed
-#                         robot_state["accel"] = protocol.theta_actual_accel
-#                         robot_state["emergency"] = protocol.emergency_stop_status
-#                         robot_state["mode"] = protocol.moving_status
 
-#                         # Gripper reeds from READ 0x26
-#                         reed1 = protocol.gripper_actual_reed1
-#                         reed2 = protocol.gripper_actual_reed2
-#                         reed3 = protocol.gripper_actual_reed3
+def _heartbeat_alive() -> bool:
+    """True when serial is up and YA was seen within HB_DEAD_TIMEOUT."""
+    if not _serial_connected():
+        return False
+    last_ya = link_state["last_ya_time"]
+    if last_ya is None:
+        return False
+    return (time.perf_counter() - last_ya) <= HB_DEAD_TIMEOUT
 
-#                         # gripper Z direction 
-#                         robot_state["gripper_z"] = (
-#                             "Up" if (reed1 and not reed2) else
-#                             "Down" if (reed2 and not reed1) else
-#                             "Idle"
-#                         )
 
-#                         # gripper jaw
-#                         if reed3 is True:
-#                             robot_state["gripper_jaw"] = "Close"
-#                         elif reed3 is False:
-#                             robot_state["gripper_jaw"] = "Open"
-#                         else:
-#                             robot_state["gripper_jaw"] = "Idle"
-            
-#             # Heartbeat: YA must have been seen within HB_DEAD_TIMEOUT
-#             if last_seen_ya_time is None:
-#                 alive = False
-#             else:
-#                 alive = (time.perf_counter() - last_seen_ya_time) <= HB_DEAD_TIMEOUT
-#             connected = int(bool(protocol.client) and protocol.is_connected() and alive)
-#             # print('connected:', connected)
+def _apply_protocol_to_robot_state() -> None:
+    """Copy latest Modbus status fields into robot_state."""
+    robot_state["position"] = protocol.theta_actual_pos
+    robot_state["speed"] = protocol.theta_actual_speed
+    robot_state["accel"] = protocol.theta_actual_accel
+    robot_state["emergency"] = protocol.emergency_stop_status
+    robot_state["mode"] = protocol.moving_status
 
-#             if connected == 0:
-#                 print("[ERROR] Lost connection to robot. Connection or heartbeat may be the issue.")
+    reed1 = protocol.gripper_actual_reed1
+    reed2 = protocol.gripper_actual_reed2
+    reed3 = protocol.gripper_actual_reed3
 
-#             payload = {
-#                 "type": "STATS",
-#                 "pos": robot_state["position"],
-#                 "speed": robot_state["speed"],
-#                 "accel": robot_state["accel"],
-#                 "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
-#                 "mode": robot_state["mode"],
-#                 "emergency": robot_state["emergency"],
-#                 "heartbeat": connected
-#             }
+    robot_state["gripper_z"] = (
+        "Up" if (reed1 and not reed2) else
+        "Down" if (reed2 and not reed1) else
+        "Idle"
+    )
+    robot_state["gripper_jaw"] = (
+        "Close" if reed3 is True else
+        "Open" if reed3 is False else
+        "Idle"
+    )
 
-#             # Push states to LSL outlet
-#             states_outlet.push_sample([
-#                 float(protocol.theta_actual_pos),
-#                 float(protocol.theta_actual_speed),
-#                 float(protocol.theta_actual_accel)
-#             ],
-            
-#             timestamp=local_clock())
-            
 
-#             try:
-#                 await websocket.send(json.dumps(payload))
-#             except ConnectionClosed:
-#                 break
-#             # await asyncio.sleep(STATS_INTERVAL)
-#              # precise 50 Hz timing
-#             next_tick += STATS_INTERVAL
-#             sleep_time = next_tick - time.perf_counter()
+def _build_stats_payload() -> dict:
+    """
+    STATS message for the UI.
 
-#             if sleep_time > 0:
-#                 await asyncio.sleep(sleep_time)
-#             else:
-#                 # loop is slower than 50 Hz; reset timing to avoid accumulating delay
-#                 next_tick = time.perf_counter()
+    serial_connected — COM port open (Connect succeeded)
+    heartbeat_alive  — robot YA handshake OK (YA seen within HB_DEAD_TIMEOUT)
+    heartbeat        — same as heartbeat_alive (kept for existing UI)
+    """
+    serial_ok = _serial_connected()
+    hb_alive = _heartbeat_alive()
+    return {
+        "type": "STATS",
+        "pos": robot_state["position"],
+        "speed": robot_state["speed"],
+        "accel": robot_state["accel"],
+        "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
+        "mode": robot_state["mode"],
+        "emergency": robot_state["emergency"],
+        "serial_connected": serial_ok,
+        "heartbeat_alive": hb_alive,
+        "heartbeat": int(hb_alive),
+    }
 
-#     except asyncio.CancelledError:
-#         pass
 
-async def stats_loop(websocket):
-    last_seen_ya_time = None
+async def heartbeat_loop() -> None:
+    """
+    5 Hz Modbus heartbeat: read reg 0x00; if robot sent YA, reply HI.
+    Does not block the 50 Hz STATS broadcast loop.
+    """
+    next_tick = time.perf_counter()
+    try:
+        while True:
+            if _serial_connected():
+                async with modbus_lock:
+                    saw_ya, _wrote_hi = await asyncio.to_thread(protocol.heartbeat_tick)
+                if saw_ya:
+                    link_state["last_ya_time"] = time.perf_counter()
+
+            next_tick = await _sleep_fixed_rate(next_tick, HB_INTERVAL)
+    except asyncio.CancelledError:
+        pass
+
+
+async def modbus_status_loop() -> None:
+    """
+    Poll full register block (0x00–0x31) for position, gripper, mode, etc.
+    Heartbeat reply is handled separately by heartbeat_loop at 5 Hz.
+    """
+    next_tick = time.perf_counter()
     freq_count = 0
     freq_t0 = time.perf_counter()
-    last_hb_write = 0
-
-    next_tick = time.perf_counter()
 
     try:
         while True:
-            ok = False
-
-            if protocol.client and protocol.is_connected():
+            if _serial_connected():
                 async with modbus_lock:
                     ok = await asyncio.to_thread(protocol.routine)
 
-                    freq_count += 1
-                    now = time.perf_counter()
-                    if now - freq_t0 >= 1.0:
-                        print(f"[FREQ] Modbus poll: {freq_count / (now - freq_t0):.1f} Hz")
-                        freq_count = 0
-                        freq_t0 = now
+                if ok:
+                    _apply_protocol_to_robot_state()
 
-                    if ok:
-                        hb_val = protocol.hb_val
-                        if hb_val == HB_YA:
-                            last_seen_ya_time = now
+                freq_count += 1
+                now = time.perf_counter()
+                if now - freq_t0 >= 1.0:
+                    print(f"[FREQ] Modbus status poll: {freq_count / (now - freq_t0):.1f} Hz")
+                    freq_count = 0
+                    freq_t0 = now
 
-                            if now - last_hb_write >= 0.2:
-                                await asyncio.to_thread(protocol.heartbeat_from_routine)
-                                last_hb_write = now
+            next_tick = await _sleep_fixed_rate(next_tick, MODBUS_STATUS_INTERVAL)
+    except asyncio.CancelledError:
+        pass
 
-                        robot_state["position"] = protocol.theta_actual_pos
-                        robot_state["speed"] = protocol.theta_actual_speed
-                        robot_state["accel"] = protocol.theta_actual_accel
-                        robot_state["emergency"] = protocol.emergency_stop_status
-                        robot_state["mode"] = protocol.moving_status
 
-                        reed1 = protocol.gripper_actual_reed1
-                        reed2 = protocol.gripper_actual_reed2
-                        reed3 = protocol.gripper_actual_reed3
+async def stats_broadcast_loop(websocket) -> None:
+    """
+    Exactly STATS_HZ samples per second to WebSocket + LSL.
 
-                        robot_state["gripper_z"] = (
-                            "Up" if (reed1 and not reed2) else
-                            "Down" if (reed2 and not reed1) else
-                            "Idle"
-                        )
+    Sleep-first timing: wait 20 ms → send one sample → repeat (50 samples/s).
+    LSL timestamps are evenly spaced at 1/STATS_HZ regardless of small send jitter.
+    """
+    next_tick = time.perf_counter()
+    lsl_t0 = None
+    sample_idx = 0
+    samples_this_second = 0
+    second_t0 = time.perf_counter()
 
-                        if reed3 is True:
-                            robot_state["gripper_jaw"] = "Close"
-                        elif reed3 is False:
-                            robot_state["gripper_jaw"] = "Open"
-                        else:
-                            robot_state["gripper_jaw"] = "Idle"
+    try:
+        while True:
+            next_tick = await _wait_stats_tick(next_tick)
 
-            if last_seen_ya_time is None:
-                alive = False
-            else:
-                alive = (time.perf_counter() - last_seen_ya_time) <= HB_DEAD_TIMEOUT
+            # If we fell more than one period behind, realign (no burst, keep 50/s cap)
+            now = time.perf_counter()
+            if next_tick < now - STATS_INTERVAL:
+                next_tick = now + STATS_INTERVAL
 
-            connected = int(bool(protocol.client) and protocol.is_connected() and alive)
+            if lsl_t0 is None:
+                lsl_t0 = local_clock()
 
-            payload = {
-                "type": "STATS",
-                "pos": robot_state["position"],
-                "speed": robot_state["speed"],
-                "accel": robot_state["accel"],
-                "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
-                "mode": robot_state["mode"],
-                "emergency": robot_state["emergency"],
-                "heartbeat": connected
-            }
+            lsl_timestamp = lsl_t0 + sample_idx / STATS_HZ
+            payload = _build_stats_payload()
 
-            states_outlet.push_sample(
-                [
-                    float(protocol.theta_actual_pos),
-                    float(protocol.theta_actual_speed),
-                    float(protocol.theta_actual_accel)
-                ],
-                timestamp=local_clock()
-            )
+            states_outlet.push_sample(_lsl_motion_sample(), timestamp=lsl_timestamp)
 
             try:
                 await websocket.send(json.dumps(payload))
             except ConnectionClosed:
                 break
 
-            # precise 50 Hz timing
-            next_tick += STATS_INTERVAL
-            sleep_time = next_tick - time.perf_counter()
+            sample_idx += 1
+            samples_this_second += 1
 
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
-            else:
-                # loop is slower than 50 Hz; reset timing to avoid accumulating delay
-                next_tick = time.perf_counter()
+            if now - second_t0 >= 1.0:
+                print(
+                    f"[FREQ] STATS broadcast: {samples_this_second} samples/s "
+                    f"(target {int(STATS_HZ)})"
+                )
+                samples_this_second = 0
+                second_t0 = now
 
     except asyncio.CancelledError:
         pass
-    
+
+
+async def _cancel_background_tasks() -> None:
+    for task in server_state.get("background_tasks", []):
+        if task and not task.done():
+            task.cancel()
+    for task in server_state.get("background_tasks", []):
+        if task:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    server_state["background_tasks"] = []
+
+
+def _start_background_loops(websocket) -> list:
+    tasks = [
+        asyncio.create_task(stats_broadcast_loop(websocket), name="stats_broadcast"),
+        asyncio.create_task(modbus_status_loop(), name="modbus_status"),
+        asyncio.create_task(heartbeat_loop(), name="heartbeat"),
+    ]
+    server_state["background_tasks"] = tasks
+    return tasks
+
 async def handler(websocket: websockets.WebSocketServerProtocol):
     print("React Client Connected!")
 
-    # Ensure only ONE stats loop is active (React dev mode can connect twice)
-    old = server_state.get("stats_task")
-    if old and not old.done():
-        old.cancel()
-        try:
-            await old
-        except asyncio.CancelledError:
-            pass
-
-    stats_task = asyncio.create_task(stats_loop(websocket))
-    server_state["stats_task"] = stats_task
+    # Ensure only ONE set of background loops (React dev mode can connect twice)
+    await _cancel_background_tasks()
+    _start_background_loops(websocket)
 
     initial_stats = {
         "type": "STATS",
@@ -296,13 +301,15 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
         "gripper": f"{robot_state['gripper_z']} / {robot_state['gripper_jaw']}",
         "mode": robot_state["mode"],
         "emergency": robot_state["emergency"],
-        "connected": bool(protocol.client) and protocol.is_connected(),
+        "serial_connected": _serial_connected(),
+        "heartbeat_alive": _heartbeat_alive(),
+        "connected": _serial_connected(),  # legacy: serial only on first message
     }
 
     try:
         await websocket.send(json.dumps(initial_stats))
     except ConnectionClosed:
-        stats_task.cancel()
+        await _cancel_background_tasks()
         return
 
     try:
@@ -328,6 +335,8 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                         ok = True
                     else :
                         ok = await asyncio.to_thread(protocol.connect_rtu, com_port, slave)
+
+                link_state["last_ya_time"] = None  # wait for fresh YA after (re)connect
 
                 await websocket.send(json.dumps({
                     "mode": "Connect",
@@ -563,11 +572,7 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
     except websockets.exceptions.ConnectionClosed:
         print("Frontend client disconnected.")
     finally:
-        stats_task.cancel()
-        try:
-            await stats_task
-        except asyncio.CancelledError:
-            pass
+        await _cancel_background_tasks()
 
 
 async def main():
