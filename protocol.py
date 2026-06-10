@@ -136,14 +136,15 @@ class Protocol(Binary):
     def connect_rtu(self, com_port: str, slave: int = 21) -> bool:
             """Create + connect Modbus RTU client."""
             self.slave_address = slave
-            self.port = com_port
+            # self.port = com_port
 
+            self.port = '/dev/ttyACM1'
             # close existing client if any
             self.disconnect()
             # print(com_port, slave)
 
             self.client = ModbusClient(
-                port=com_port,
+                port=self.port,
                 baudrate=230400,
                 parity="E",
                 stopbits=1,

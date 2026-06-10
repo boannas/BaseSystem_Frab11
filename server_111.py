@@ -232,7 +232,9 @@ async def stats_loop(websocket):
             else:
                 alive = (time.perf_counter() - last_seen_ya_time) <= HB_DEAD_TIMEOUT
 
-            connected = int(bool(protocol.client) and protocol.is_connected() and alive)
+            # connected = int(bool(protocol.client) and protocol.is_connected() and alive)
+
+            connected = int(bool(protocol.client) and protocol.is_connected())
 
             payload = {
                 "type": "STATS",
@@ -253,6 +255,7 @@ async def stats_loop(websocket):
                 ],
                 timestamp=local_clock()
             )
+            print(f"[LSL] Pushed states: pos={protocol.theta_actual_pos}, speed={protocol.theta_actual_speed}, accel={protocol.theta_actual_accel}")
 
             try:
                 await websocket.send(json.dumps(payload))
@@ -403,6 +406,7 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                         "timestamp": time.time()
                     }
                     event_outlet.push_sample([json.dumps(payload)])
+                    print(f"[EVENT] Received jog command: {payload}")
 
                     async with modbus_lock:
                         await asyncio.to_thread(protocol.write_jog, jog_value)
@@ -436,6 +440,7 @@ async def handler(websocket: websockets.WebSocketServerProtocol):
                         "use_gripper": gripper_enable,
                         "timestamp": time.time()
                     }
+                    print(f"[EVENT] Received pick/place command: {payload}")
                     event_outlet.push_sample([json.dumps(payload)])
 
                     async with modbus_lock:
